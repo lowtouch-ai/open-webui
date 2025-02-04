@@ -65,9 +65,9 @@ logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
-log.debug("Setting aiohttp buffer size")
-log.debug(f"{aiohttp.streams.DEFAULT_LIMIT}")
-log.debug(f"{aiohttp.streams.DEFAULT_READ_LIMIT}")
+log.info("Setting aiohttp buffer size")
+log.info(f"{aiohttp.streams.DEFAULT_LIMIT}")
+log.info(f"{aiohttp.streams.DEFAULT_READ_LIMIT}")
 
 # -------------------------------------------------------------
 # Helper function for streaming response reading using fixed-size chunks.
@@ -77,54 +77,88 @@ log.debug(f"{aiohttp.streams.DEFAULT_READ_LIMIT}")
 # Updated read_stream helper function
 async def read_stream(response, small_chunk_size=65536):
     """
-    Reads data from a streaming response in fixed-size chunks.
-    If the response is a FastAPI/Starlette StreamingResponse (which is not async iterable),
-    this function will attempt to use its original streaming_content.
-    If that iterator is synchronous, we wrap it into an async generator.
-    If neither streaming_content nor content.iter_chunked is available,
-    we fall back to response.body_iterator.
-    In all cases, we accumulate text into a buffer and yield complete lines.
+    Reads data from a streaming response in fixed-size chunks and yields complete lines.
+    
+    Priority:
+      1. If response is a StreamingResponse with a 'streaming_content' attribute, use that.
+      2. Else if response has a 'content' attribute with iter_chunked(), use that.
+      3. Else if response has a 'body_iterator', use that.
+      4. Otherwise, iterate directly.
+    
+    If a ValueError("Chunk too big") occurs (from using a line-based iterator),
+    fall back to reading the entire body via response.read() and manually splitting it
+    into small chunks.
     """
     buffer = ""
-    
-    # Case 1: StreamingResponse with a streaming_content attribute.
-    if hasattr(response, "streaming_content"):
+    iterator = None
+
+    # Priority 1: StreamingResponse with streaming_content.
+    if isinstance(response, StreamingResponse) and hasattr(response, "streaming_content"):
+        log.info("read_stream: Detected StreamingResponse with streaming_content; using that.")
         content_iter = response.streaming_content
-        # If streaming_content is callable, call it.
         if callable(content_iter):
             content_iter = content_iter()
-        # If it's a synchronous iterator, wrap it to make it async.
+            log.info("read_stream: Called streaming_content() to obtain iterator.")
         if not hasattr(content_iter, "__aiter__"):
+            log.info("read_stream: Wrapping synchronous streaming_content iterator as async.")
             async def async_gen(sync_iter):
                 for item in sync_iter:
                     yield item
-            content_iter = async_gen(content_iter)
-        # Now iterate over the async iterator.
-        async for chunk in content_iter:
-            text = chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk
-            buffer += text
-            while "\n" in buffer:
-                line, buffer = buffer.split("\n", 1)
-                yield line.strip()
-    # Case 2: Response with a content attribute supporting iter_chunked.
+            iterator = async_gen(content_iter)
+        else:
+            iterator = content_iter
+    # Priority 2: Use response.content.iter_chunked() if available.
     elif hasattr(response, "content") and hasattr(response.content, "iter_chunked"):
-        async for chunk in response.content.iter_chunked(small_chunk_size):
-            text = chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk
-            buffer += text
-            while "\n" in buffer:
-                line, buffer = buffer.split("\n", 1)
-                yield line.strip()
-    # Case 3: Fallback to body_iterator.
+        log.info("read_stream: Using response.content.iter_chunked().")
+        iterator = response.content.iter_chunked(small_chunk_size)
+    # Priority 3: Else if body_iterator is available.
     elif hasattr(response, "body_iterator"):
-        async for chunk in response.body_iterator:
+        log.info("read_stream: Using body_iterator.")
+        iterator = response.body_iterator
+    # Priority 4: Otherwise, iterate directly.
+    else:
+        log.info("read_stream: Using response directly as iterator.")
+        iterator = response
+
+    try:
+        async for chunk in iterator:
+            if isinstance(chunk, bytes):
+                chunk_size = len(chunk)
+            else:
+                chunk_size = len(chunk.encode("utf-8"))
+            log.info("read_stream: Received chunk of size: %d", chunk_size)
             text = chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk
             buffer += text
+            log.info("read_stream: Buffer length now: %d", len(buffer))
             while "\n" in buffer:
                 line, buffer = buffer.split("\n", 1)
+                log.info("read_stream: Yielding line: %s", line.strip())
                 yield line.strip()
-    # Yield any remaining buffered text.
+    except ValueError as e:
+        if str(e) == "Chunk too big":
+            logger.warning("read_stream: Caught 'Chunk too big' error. Falling back to full read.")
+            # Fallback: read entire content at once and then yield in small chunks.
+            try:
+                full_body = await response.read()
+                log.info("read_stream: Full body length: %d", len(full_body))
+                text = full_body.decode("utf-8")
+                # Process the text in small fixed-size chunks.
+                for i in range(0, len(text), small_chunk_size):
+                    chunk = text[i:i+small_chunk_size]
+                    log.info("read_stream fallback: Processing manual chunk from %d to %d", i, i+small_chunk_size)
+                    buffer += chunk
+                    while "\n" in buffer:
+                        line, buffer = buffer.split("\n", 1)
+                        log.info("read_stream fallback: Yielding line: %s", line.strip())
+                        yield line.strip()
+            except Exception as ex:
+                logger.exception("read_stream fallback: Error reading full body: %s", ex)
+                raise ex
     if buffer:
+        log.info("read_stream: Yielding final buffered data of length %d", len(buffer))
         yield buffer.strip()
+    log.info("read_stream: Finished processing.")
+
 
 
 async def chat_completion_filter_functions_handler(request, body, model, extra_params):
@@ -260,7 +294,7 @@ async def chat_completion_tools_handler(
     metadata = body.get("metadata", {})
 
     tool_ids = metadata.get("tool_ids", None)
-    log.debug(f"{tool_ids=}")
+    log.info(f"{tool_ids=}")
     if not tool_ids:
         return body, {}
 
@@ -304,9 +338,9 @@ async def chat_completion_tools_handler(
 
     try:
         response = await generate_chat_completion(request, form_data=payload, user=user)
-        log.debug(f"{response=}")
+        log.info(f"{response=}")
         content = await get_content_from_response(response)
-        log.debug(f"{content=}")
+        log.info(f"{content=}")
 
         if not content:
             return body, {}
@@ -380,7 +414,7 @@ async def chat_completion_tools_handler(
         log.exception(f"Error: {e}")
         content = None
 
-    log.debug(f"tool_contexts: {sources}")
+    log.info(f"tool_contexts: {sources}")
 
     if skip_files and "files" in body.get("metadata", {}):
         del body["metadata"]["files"]
@@ -585,7 +619,7 @@ async def chat_completion_files_handler(
             hybrid_search=request.app.state.config.ENABLE_RAG_HYBRID_SEARCH,
         )
 
-        log.debug(f"rag_contexts:sources: {sources}")
+        log.info(f"rag_contexts:sources: {sources}")
     return body, {"sources": sources}
 
 
@@ -619,7 +653,7 @@ def apply_params_to_form_data(form_data, model):
 
 async def process_chat_payload(request, form_data, metadata, user, model):
     form_data = apply_params_to_form_data(form_data, model)
-    log.debug(f"form_data: {form_data}")
+    log.info(f"form_data: {form_data}")
 
     event_emitter = get_event_emitter(metadata)
     event_call = get_event_call(metadata)
@@ -755,7 +789,7 @@ async def process_chat_payload(request, form_data, metadata, user, model):
             request.app.state.config.RELEVANCE_THRESHOLD == 0
             and context_string.strip() == ""
         ):
-            log.debug(
+            log.info(
                 f"With a 0 relevancy threshold for RAG, the context cannot be empty"
             )
 
@@ -798,18 +832,19 @@ async def process_chat_payload(request, form_data, metadata, user, model):
     return form_data, events
 
 
-async def process_chat_response(
-    request, response, form_data, user, events, metadata, tasks
-):
+async def process_chat_response(request, response, form_data, user, events, metadata, tasks):
     async def background_tasks_handler():
+        log.info("background_tasks_handler: Fetching message map for chat_id: %s", metadata["chat_id"])
         message_map = Chats.get_messages_by_chat_id(metadata["chat_id"])
         message = message_map.get(metadata["message_id"]) if message_map else None
 
         if message:
             messages = get_message_list(message_map, message.get("id"))
+            log.info("background_tasks_handler: Retrieved %d messages", len(messages))
             if tasks:
                 if TASKS.TITLE_GENERATION in tasks:
                     if tasks[TASKS.TITLE_GENERATION]:
+                        log.info("background_tasks_handler: Starting title generation task")
                         res = await generate_title(
                             request,
                             {
@@ -828,17 +863,16 @@ async def process_chat_response(
                             if not title:
                                 title = messages[0].get("content", "New Chat")
                             Chats.update_chat_title_by_id(metadata["chat_id"], title)
-                            await event_emitter(
-                                {"type": "chat:title", "data": title}
-                            )
+                            log.info("background_tasks_handler: Updated chat title to: %s", title)
+                            await event_emitter({"type": "chat:title", "data": title})
                     elif len(messages) == 2:
                         title = messages[0].get("content", "New Chat")
                         Chats.update_chat_title_by_id(metadata["chat_id"], title)
-                        await event_emitter(
-                            {"type": "chat:title", "data": message.get("content", "New Chat")}
-                        )
+                        log.info("background_tasks_handler: Updated chat title (2 messages) to: %s", title)
+                        await event_emitter({"type": "chat:title", "data": message.get("content", "New Chat")})
 
                 if TASKS.TAGS_GENERATION in tasks and tasks[TASKS.TAGS_GENERATION]:
+                    log.info("background_tasks_handler: Starting tags generation task")
                     res = await generate_chat_tags(
                         request,
                         {
@@ -854,15 +888,14 @@ async def process_chat_response(
                             .get("message", {})
                             .get("content", "")
                         )
-                        tags_string = tags_string[
-                            tags_string.find("{") : tags_string.rfind("}") + 1
-                        ]
+                        tags_string = tags_string[tags_string.find("{") : tags_string.rfind("}") + 1]
                         try:
                             tags = json.loads(tags_string).get("tags", [])
                             Chats.update_chat_tags_by_id(metadata["chat_id"], tags, user)
+                            log.info("background_tasks_handler: Updated chat tags: %s", tags)
                             await event_emitter({"type": "chat:tags", "data": tags})
                         except Exception as e:
-                            print(f"Error: {e}")
+                            log.exception("background_tasks_handler: Error processing tags: %s", e)
 
     event_emitter = None
     if (
@@ -874,9 +907,11 @@ async def process_chat_response(
         and metadata["message_id"]
     ):
         event_emitter = get_event_emitter(metadata)
-
-    # If the response is not streaming, simply process and return
+        log.info("process_chat_response: Obtained event_emitter for metadata: %s", metadata)
+    
+    # If the response is not streaming, process it normally.
     if not isinstance(response, StreamingResponse):
+        log.info("process_chat_response: Response is not streaming.")
         if event_emitter:
             if "selected_model_id" in response:
                 Chats.upsert_message_to_chat_by_id_and_message_id(
@@ -884,16 +919,14 @@ async def process_chat_response(
                     metadata["message_id"],
                     {"selectedModelId": response["selected_model_id"]},
                 )
+                log.info("process_chat_response: Updated selectedModelId from response.")
             if response.get("choices", [])[0].get("message", {}).get("content"):
                 content = response["choices"][0]["message"]["content"]
+                log.info("process_chat_response: Retrieved non-streaming content of length %d", len(content))
                 if content:
-                    await event_emitter(
-                        {"type": "chat:completion", "data": response}
-                    )
+                    await event_emitter({"type": "chat:completion", "data": response})
                     title = Chats.get_chat_title_by_id(metadata["chat_id"])
-                    await event_emitter(
-                        {"type": "chat:completion", "data": {"done": True, "content": content, "title": title}}
-                    )
+                    await event_emitter({"type": "chat:completion", "data": {"done": True, "content": content, "title": title}})
                     Chats.upsert_message_to_chat_by_id_and_message_id(
                         metadata["chat_id"], metadata["message_id"], {"content": content}
                     )
@@ -915,67 +948,77 @@ async def process_chat_response(
         else:
             return response
 
-    # For streaming responses with event emitter, use a background task.
+    # For streaming responses with event_emitter, use a background task.
     if event_emitter:
-        task_id = str(uuid4())  # Create a unique task ID.
+        task_id = str(uuid4())
+        log.info("process_chat_response: Streaming response detected. Creating background task with id: %s", task_id)
 
         async def post_response_handler(response, events):
-            message = Chats.get_message_by_id_and_message_id(
-                metadata["chat_id"], metadata["message_id"]
-            )
+            message = Chats.get_message_by_id_and_message_id(metadata["chat_id"], metadata["message_id"])
             content = message.get("content", "") if message else ""
+            log.info("post_response_handler: Starting with initial content length %d", len(content))
 
             try:
                 # Send any pre-existing events
                 for event in events:
+                    log.info("post_response_handler: Emitting pre-existing event: %s", event)
                     await event_emitter({"type": "chat:completion", "data": event})
                     Chats.upsert_message_to_chat_by_id_and_message_id(
                         metadata["chat_id"], metadata["message_id"], {**event}
                     )
 
-                # Set fixed chunk size values
                 CHUNK_SIZE_LIMIT = 524288  # 512 KB (if needed later)
                 SMALL_CHUNK_SIZE = 65536   # 64 KB
+                log.info("post_response_handler: Starting to process streaming chunks with SMALL_CHUNK_SIZE=%d", SMALL_CHUNK_SIZE)
 
                 # Read the response using our custom read_stream function.
-                async for line in read_stream(response, small_chunk_size=SMALL_CHUNK_SIZE):
-                    # If the line is empty, skip it.
-                    if not line:
-                        continue
-                    # Expecting each line to start with "data: "
-                    if not line.startswith("data: "):
-                        continue
+                try:
+                    async for line in read_stream(response, small_chunk_size=SMALL_CHUNK_SIZE):
+                        log.info("post_response_handler: Received line: %s", line)
+                        if not line:
+                            log.info("post_response_handler: Skipping empty line.")
+                            continue
+                        # Expect each line to start with "data: "
+                        if not line.startswith("data: "):
+                            log.info("post_response_handler: Line does not start with 'data: ', skipping: %s", line)
+                            continue
 
-                    data_str = line[len("data: "):]
-                    try:
-                        data = json.loads(data_str)
-                        if "selected_model_id" in data:
-                            Chats.upsert_message_to_chat_by_id_and_message_id(
-                                metadata["chat_id"],
-                                metadata["message_id"],
-                                {"selectedModelId": data["selected_model_id"]},
-                            )
-                        else:
-                            # Append new content from delta
-                            value = data.get("choices", [])[0].get("delta", {}).get("content")
-                            if value:
-                                content += value
-                                if ENABLE_REALTIME_CHAT_SAVE:
-                                    Chats.upsert_message_to_chat_by_id_and_message_id(
-                                        metadata["chat_id"],
-                                        metadata["message_id"],
-                                        {"content": content},
-                                    )
-                        # Emit the event to the client
-                        await event_emitter({"type": "chat:completion", "data": data})
-                    except Exception as e:
-                        if "data: [DONE]" in line:
-                            pass
-                        else:
-                            log.exception(f"Error processing chunk: {e}")
-
+                        data_str = line[len("data: "):]
+                        try:
+                            data = json.loads(data_str)
+                            log.info("post_response_handler: Parsed data: %s", data)
+                            if "selected_model_id" in data:
+                                Chats.upsert_message_to_chat_by_id_and_message_id(
+                                    metadata["chat_id"],
+                                    metadata["message_id"],
+                                    {"selectedModelId": data["selected_model_id"]},
+                                )
+                                log.info("post_response_handler: Updated selectedModelId: %s", data["selected_model_id"])
+                            else:
+                                value = data.get("choices", [])[0].get("delta", {}).get("content")
+                                if value:
+                                    content += value
+                                    log.info("post_response_handler: Appended value chunk of length %d, total content length now %d", len(value), len(content))
+                                    if ENABLE_REALTIME_CHAT_SAVE:
+                                        Chats.upsert_message_to_chat_by_id_and_message_id(
+                                            metadata["chat_id"],
+                                            metadata["message_id"],
+                                            {"content": content},
+                                        )
+                            # Emit the event to the client
+                            await event_emitter({"type": "chat:completion", "data": data})
+                        except Exception as e:
+                            if "data: [DONE]" in line:
+                                log.info("post_response_handler: Received DONE signal.")
+                                pass
+                            else:
+                                log.exception("post_response_handler: Error processing chunk: %s", e)
+                except Exception as e:
+                    log.warning("Remote side closed connection: %s", e)
+                
                 title = Chats.get_chat_title_by_id(metadata["chat_id"])
                 final_data = {"done": True, "content": content, "title": title}
+                log.info("post_response_handler: Final content length: %d, title: %s", len(content), title)
 
                 if not ENABLE_REALTIME_CHAT_SAVE:
                     Chats.upsert_message_to_chat_by_id_and_message_id(
@@ -995,11 +1038,11 @@ async def process_chat_response(
                                 "url": f"{request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}",
                             },
                         )
-
                 await event_emitter({"type": "chat:completion", "data": final_data})
+                log.info("post_response_handler: Emitted final completion event.")
                 await background_tasks_handler()
             except asyncio.CancelledError:
-                print("Task was cancelled!")
+                log.warning("post_response_handler: Task was cancelled!")
                 await event_emitter({"type": "task-cancelled"})
                 if not ENABLE_REALTIME_CHAT_SAVE:
                     Chats.upsert_message_to_chat_by_id_and_message_id(
@@ -1007,15 +1050,18 @@ async def process_chat_response(
                     )
             finally:
                 if hasattr(response, "release"):
+                    log.info("post_response_handler: Releasing response resources.")
                     await response.release()
                 if response.background is not None:
+                    log.info("post_response_handler: Awaiting response.background task.")
                     await response.background()
 
         task_id, _ = create_task(post_response_handler(response, events))
+        log.info("process_chat_response: Created background task with id: %s", task_id)
         return {"status": True, "task_id": task_id}
-
     else:
         # Fallback: use the original streaming response but split large data into chunks.
+        log.info("process_chat_response: No event emitter available; using fallback stream_wrapper.")
         async def stream_wrapper(original_generator, events):
             CHUNK_SIZE_LIMIT = 1048576  # 1MB
             SMALL_CHUNK_SIZE = 65536    # 64KB
@@ -1027,8 +1073,10 @@ async def process_chat_response(
                 yield wrap_item(json.dumps(event))
 
             async for data in original_generator:
+                log.info("stream_wrapper: Received data of length %d", len(data))
                 if len(data) > CHUNK_SIZE_LIMIT:
                     for i in range(0, len(data), SMALL_CHUNK_SIZE):
+                        log.info("stream_wrapper: Yielding chunk from %d to %d", i, i + SMALL_CHUNK_SIZE)
                         yield data[i: i + SMALL_CHUNK_SIZE]
                 else:
                     yield data
