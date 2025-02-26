@@ -69,7 +69,7 @@ log.setLevel(SRC_LOG_LEVELS["OLLAMA"])
 # ENABLE_FORWARD_USER_INFO_HEADERS=True
 
 
-async def send_get_request(url, key=None,user=None):
+async def send_get_request(url, key=None, user=None):
     timeout = aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT_OPENAI_MODEL_LIST)
     headers = {**({"Authorization": f"Bearer {key}"} if key else {})}
     # Conditionally add user info
@@ -86,9 +86,9 @@ async def send_get_request(url, key=None,user=None):
                 "X-OpenWebUI-User-Role": user.role,
             }
         )
-        log.info(f"{headers}")
-        log.info(f"User info: {user.name}, {user.id}, {user.email}, {user.role}")
-        
+
+        log.info(f"User info: Name :{user.name},Role : {user.role}")
+
     try:
         async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
             async with session.get(url, headers=headers) as response:
@@ -115,7 +115,7 @@ async def send_post_request(
     stream: bool = True,
     key: Optional[str] = None,
     content_type: Optional[str] = None,
-    user = None,  # Add this parameter
+    user=None,  # Add this parameter
 ):
 
     r = None
@@ -128,13 +128,9 @@ async def send_post_request(
             "Content-Type": "application/json",
             **({"Authorization": f"Bearer {key}"} if key else {}),
         }
-        
-        log.info(f"headers: {headers}")
- 
-        log.info(f"user : {user} and enable {ENABLE_FORWARD_USER_INFO_HEADERS} ")
+
         # Conditionally add user info
         if user and ENABLE_FORWARD_USER_INFO_HEADERS:
-            # log.info(f"user : {user} and enable {ENABLE_FORWARD_USER_INFO_HEADERS} ")
             headers.update(
                 {
                     "X-OpenWebUI-User-Name": user.name,
@@ -143,9 +139,7 @@ async def send_post_request(
                     "X-OpenWebUI-User-Role": user.role,
                 }
             )
-            log.info(f"Sending POST request to {url}")
-            log.info(f"{headers}")
-            log.info(f"User info: {user.name}, {user.id}, {user.email}, {user.role}")
+            log.info(f"User info: Name :{user.name},Role : {user.role}")
 
         r = await session.post(
             url,
@@ -418,9 +412,8 @@ async def get_ollama_tags(
                         "X-OpenWebUI-User-Role": user.role,
                     }
                 )
-                log.info(f"{headers}")
-                log.info(f"User info: {user.name}, {user.id}, {user.email}, {user.role}")
-            
+                log.info(f"User info: Name :{user.name},Role : {user.role}")
+
             r = requests.request(
                 method="GET",
                 url=f"{url}/api/tags",
@@ -646,8 +639,6 @@ async def copy_model(
     user=Depends(get_admin_user),
 ):
 
-    
-    
     if url_idx is None:
         await get_all_models(request)
         models = request.app.state.OLLAMA_MODELS
@@ -676,9 +667,8 @@ async def copy_model(
                 }
             )
 
-            log.info(f"{headers}")
-            log.info(f"User info: {user.name}, {user.id}, {user.email}, {user.role}")
-            
+            log.info(f"User info: Name :{user.name},Role : {user.role}")
+
         r = requests.request(
             method="POST",
             url=f"{url}/api/copy",
@@ -743,9 +733,8 @@ async def delete_model(
                 }
             )
 
-            log.info(f"{headers}")
-            log.info(f"User info: {user.name}, {user.id}, {user.email}, {user.role}")
-        
+            log.info(f"User info: Name :{user.name},Role : {user.role}")
+
         r = requests.request(
             method="DELETE",
             url=f"{url}/api/delete",
@@ -805,9 +794,8 @@ async def show_model_info(
                 }
             )
 
-            log.info(f"{headers}")
-            log.info(f"User info: {user.name}, {user.id}, {user.email}, {user.role}")
-            
+            log.info(f"User info: Name :{user.name},Role : {user.role}")
+
         r = requests.request(
             method="POST",
             url=f"{url}/api/show",
@@ -886,9 +874,8 @@ async def embed(
                 }
             )
 
-            log.info(f"{headers}")
-            log.info(f"User info: {user.name}, {user.id}, {user.email}, {user.role}")
-            
+            log.info(f"User info: Name :{user.name},Role : {user.role}")
+
         r = requests.request(
             method="POST",
             url=f"{url}/api/embed",
@@ -950,7 +937,7 @@ async def embeddings(
                 status_code=400,
                 detail=ERROR_MESSAGES.MODEL_NOT_FOUND(form_data.model),
             )
-        
+
     url = request.app.state.config.OLLAMA_BASE_URLS[url_idx]
     key = get_api_key(url_idx, url, request.app.state.config.OLLAMA_API_CONFIGS)
 
@@ -967,9 +954,8 @@ async def embeddings(
                 }
             )
 
-            log.info(f"{headers}")
-            log.info(f"User info: {user.name}, {user.id}, {user.email}, {user.role}")
-            
+            log.info(f"User info: Name :{user.name},Role : {user.role}")
+
         r = requests.request(
             method="POST",
             url=f"{url}/api/embeddings",
@@ -1051,8 +1037,7 @@ async def generate_completion(
         url=f"{url}/api/generate",
         payload=form_data.model_dump_json(exclude_none=True).encode(),
         key=get_api_key(url_idx, url, request.app.state.config.OLLAMA_API_CONFIGS),
-        user=user, 
-        # stream=form_data.stream,
+        user=user,
     )
 
 
@@ -1176,8 +1161,6 @@ async def generate_chat_completion(
     if prefix_id:
         payload["model"] = payload["model"].replace(f"{prefix_id}.", "")
 
-    
-    
     return await send_post_request(
         url=f"{url}/api/chat",
         payload=json.dumps(payload),
@@ -1600,7 +1583,7 @@ async def upload_model(
                 response = requests.post(url, data=f)
 
             if response.ok:
-                log.info(f"Uploaded to /api/blobs")  # DEBUG
+                log.info("Uploaded to /api/blobs")  # DEBUG
                 # Remove local file
                 os.remove(file_path)
 
@@ -1624,7 +1607,7 @@ async def upload_model(
                 )
 
                 if create_resp.ok:
-                    log.info(f"API SUCCESS!")  # DEBUG
+                    log.info("API SUCCESS!")  # DEBUG
                     done_msg = {
                         "done": True,
                         "blob": f"sha256:{file_hash}",
