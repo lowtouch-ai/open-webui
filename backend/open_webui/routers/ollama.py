@@ -14,6 +14,11 @@ from urllib.parse import urlparse
 import aiohttp
 from aiocache import cached
 import requests
+from open_webui.models.users import UserModel
+
+from open_webui.env import (
+    ENABLE_FORWARD_USER_INFO_HEADERS,
+)
 
 from fastapi import (
     Depends,
@@ -50,7 +55,7 @@ from open_webui.env import (
     ENV,
     SRC_LOG_LEVELS,
     AIOHTTP_CLIENT_TIMEOUT,
-    AIOHTTP_CLIENT_TIMEOUT_OPENAI_MODEL_LIST,
+    AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST,
     BYPASS_MODEL_ACCESS_CONTROL,
     ENABLE_FORWARD_USER_INFO_HEADERS,
 )
@@ -89,9 +94,27 @@ async def send_get_request(url, key=None, user=None):
 
         log.info(f"User info: Name :{user.name},Role : {user.role}")
 
+async def send_get_request(url, key=None, user: UserModel = None):
+    timeout = aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST)
     try:
         async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
-            async with session.get(url, headers=headers) as response:
+            async with session.get(
+                url,
+                headers={
+                    "Content-Type": "application/json",
+                    **({"Authorization": f"Bearer {key}"} if key else {}),
+                    **(
+                        {
+                            "X-OpenWebUI-User-Name": user.name,
+                            "X-OpenWebUI-User-Id": user.id,
+                            "X-OpenWebUI-User-Email": user.email,
+                            "X-OpenWebUI-User-Role": user.role,
+                        }
+                        if ENABLE_FORWARD_USER_INFO_HEADERS and user
+                        else {}
+                    ),
+                },
+            ) as response:
                 return await response.json()
     except Exception as e:
         # Handle connection error here
@@ -115,7 +138,7 @@ async def send_post_request(
     stream: bool = True,
     key: Optional[str] = None,
     content_type: Optional[str] = None,
-    user=None,  # Add this parameter
+    user: UserModel = None,
 ):
 
     r = None
@@ -144,7 +167,20 @@ async def send_post_request(
         r = await session.post(
             url,
             data=payload,
-            headers=headers,
+            headers={
+                "Content-Type": "application/json",
+                **({"Authorization": f"Bearer {key}"} if key else {}),
+                **(
+                    {
+                        "X-OpenWebUI-User-Name": user.name,
+                        "X-OpenWebUI-User-Id": user.id,
+                        "X-OpenWebUI-User-Email": user.email,
+                        "X-OpenWebUI-User-Role": user.role,
+                    }
+                    if ENABLE_FORWARD_USER_INFO_HEADERS and user
+                    else {}
+                ),
+            },
         )
         r.raise_for_status()
 
@@ -220,12 +256,24 @@ async def verify_connection(
     key = form_data.key
 
     async with aiohttp.ClientSession(
-        timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT_OPENAI_MODEL_LIST)
+        timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST)
     ) as session:
         try:
             async with session.get(
                 f"{url}/api/version",
-                headers={**({"Authorization": f"Bearer {key}"} if key else {})},
+                headers={
+                    **({"Authorization": f"Bearer {key}"} if key else {}),
+                    **(
+                        {
+                            "X-OpenWebUI-User-Name": user.name,
+                            "X-OpenWebUI-User-Id": user.id,
+                            "X-OpenWebUI-User-Email": user.email,
+                            "X-OpenWebUI-User-Role": user.role,
+                        }
+                        if ENABLE_FORWARD_USER_INFO_HEADERS and user
+                        else {}
+                    ),
+                },
             ) as r:
                 if r.status != 200:
                     detail = f"HTTP Error: {r.status}"
@@ -287,8 +335,8 @@ async def update_config(
     }
 
 
-@cached(ttl=3)
-async def get_all_models(request: Request):
+@cached(ttl=1)
+async def get_all_models(request: Request, user: UserModel = None):
     log.info("get_all_models()")
     if request.app.state.config.ENABLE_OLLAMA_API:
         request_tasks = []
@@ -296,7 +344,7 @@ async def get_all_models(request: Request):
             if (str(idx) not in request.app.state.config.OLLAMA_API_CONFIGS) and (
                 url not in request.app.state.config.OLLAMA_API_CONFIGS  # Legacy support
             ):
-                request_tasks.append(send_get_request(f"{url}/api/tags"))
+                request_tasks.append(send_get_request(f"{url}/api/tags", user=user))
             else:
                 api_config = request.app.state.config.OLLAMA_API_CONFIGS.get(
                     str(idx),
@@ -309,7 +357,9 @@ async def get_all_models(request: Request):
                 key = api_config.get("key", None)
 
                 if enable:
-                    request_tasks.append(send_get_request(f"{url}/api/tags", key))
+                    request_tasks.append(
+                        send_get_request(f"{url}/api/tags", key, user=user)
+                    )
                 else:
                     request_tasks.append(asyncio.ensure_future(asyncio.sleep(0, None)))
 
@@ -326,6 +376,7 @@ async def get_all_models(request: Request):
                 )
 
                 prefix_id = api_config.get("prefix_id", None)
+                tags = api_config.get("tags", [])
                 model_ids = api_config.get("model_ids", [])
 
                 if len(model_ids) != 0 and "models" in response:
@@ -339,6 +390,10 @@ async def get_all_models(request: Request):
                 if prefix_id:
                     for model in response.get("models", []):
                         model["model"] = f"{prefix_id}.{model['model']}"
+
+                if tags:
+                    for model in response.get("models", []):
+                        model["tags"] = tags
 
         def merge_models_lists(model_lists):
             merged_models = {}
@@ -394,7 +449,7 @@ async def get_ollama_tags(
     models = []
 
     if url_idx is None:
-        models = await get_all_models(request)
+        models = await get_all_models(request, user=user)
     else:
         url = request.app.state.config.OLLAMA_BASE_URLS[url_idx]
         key = get_api_key(url_idx, url, request.app.state.config.OLLAMA_API_CONFIGS)
@@ -417,7 +472,19 @@ async def get_ollama_tags(
             r = requests.request(
                 method="GET",
                 url=f"{url}/api/tags",
-                headers=headers,
+                headers={
+                    **({"Authorization": f"Bearer {key}"} if key else {}),
+                    **(
+                        {
+                            "X-OpenWebUI-User-Name": user.name,
+                            "X-OpenWebUI-User-Id": user.id,
+                            "X-OpenWebUI-User-Email": user.email,
+                            "X-OpenWebUI-User-Role": user.role,
+                        }
+                        if ENABLE_FORWARD_USER_INFO_HEADERS and user
+                        else {}
+                    ),
+                },
             )
             r.raise_for_status()
 
@@ -451,18 +518,27 @@ async def get_ollama_versions(request: Request, url_idx: Optional[int] = None):
     if request.app.state.config.ENABLE_OLLAMA_API:
         if url_idx is None:
             # returns lowest version
-            request_tasks = [
-                send_get_request(
-                    f"{url}/api/version",
+            request_tasks = []
+
+            for idx, url in enumerate(request.app.state.config.OLLAMA_BASE_URLS):
+                api_config = request.app.state.config.OLLAMA_API_CONFIGS.get(
+                    str(idx),
                     request.app.state.config.OLLAMA_API_CONFIGS.get(
-                        str(idx),
-                        request.app.state.config.OLLAMA_API_CONFIGS.get(
-                            url, {}
-                        ),  # Legacy support
-                    ).get("key", None),
+                        url, {}
+                    ),  # Legacy support
                 )
-                for idx, url in enumerate(request.app.state.config.OLLAMA_BASE_URLS)
-            ]
+
+                enable = api_config.get("enable", True)
+                key = api_config.get("key", None)
+
+                if enable:
+                    request_tasks.append(
+                        send_get_request(
+                            f"{url}/api/version",
+                            key,
+                        )
+                    )
+
             responses = await asyncio.gather(*request_tasks)
             responses = list(filter(lambda x: x is not None, responses))
 
@@ -576,7 +652,7 @@ async def push_model(
     user=Depends(get_admin_user),
 ):
     if url_idx is None:
-        await get_all_models(request)
+        await get_all_models(request, user=user)
         models = request.app.state.OLLAMA_MODELS
 
         if form_data.name in models:
@@ -640,7 +716,7 @@ async def copy_model(
 ):
 
     if url_idx is None:
-        await get_all_models(request)
+        await get_all_models(request, user=user)
         models = request.app.state.OLLAMA_MODELS
 
         if form_data.source in models:
@@ -672,7 +748,20 @@ async def copy_model(
         r = requests.request(
             method="POST",
             url=f"{url}/api/copy",
-            headers=headers,
+            headers={
+                "Content-Type": "application/json",
+                **({"Authorization": f"Bearer {key}"} if key else {}),
+                **(
+                    {
+                        "X-OpenWebUI-User-Name": user.name,
+                        "X-OpenWebUI-User-Id": user.id,
+                        "X-OpenWebUI-User-Email": user.email,
+                        "X-OpenWebUI-User-Role": user.role,
+                    }
+                    if ENABLE_FORWARD_USER_INFO_HEADERS and user
+                    else {}
+                ),
+            },
             data=form_data.model_dump_json(exclude_none=True).encode(),
         )
         r.raise_for_status()
@@ -706,7 +795,7 @@ async def delete_model(
     user=Depends(get_admin_user),
 ):
     if url_idx is None:
-        await get_all_models(request)
+        await get_all_models(request, user=user)
         models = request.app.state.OLLAMA_MODELS
 
         if form_data.name in models:
@@ -739,7 +828,20 @@ async def delete_model(
             method="DELETE",
             url=f"{url}/api/delete",
             data=form_data.model_dump_json(exclude_none=True).encode(),
-            headers=headers,
+            headers={
+                "Content-Type": "application/json",
+                **({"Authorization": f"Bearer {key}"} if key else {}),
+                **(
+                    {
+                        "X-OpenWebUI-User-Name": user.name,
+                        "X-OpenWebUI-User-Id": user.id,
+                        "X-OpenWebUI-User-Email": user.email,
+                        "X-OpenWebUI-User-Role": user.role,
+                    }
+                    if ENABLE_FORWARD_USER_INFO_HEADERS and user
+                    else {}
+                ),
+            },
         )
         r.raise_for_status()
 
@@ -767,7 +869,7 @@ async def delete_model(
 async def show_model_info(
     request: Request, form_data: ModelNameForm, user=Depends(get_verified_user)
 ):
-    await get_all_models(request)
+    await get_all_models(request, user=user)
     models = request.app.state.OLLAMA_MODELS
 
     if form_data.name not in models:
@@ -799,7 +901,20 @@ async def show_model_info(
         r = requests.request(
             method="POST",
             url=f"{url}/api/show",
-            headers=headers,
+            headers={
+                "Content-Type": "application/json",
+                **({"Authorization": f"Bearer {key}"} if key else {}),
+                **(
+                    {
+                        "X-OpenWebUI-User-Name": user.name,
+                        "X-OpenWebUI-User-Id": user.id,
+                        "X-OpenWebUI-User-Email": user.email,
+                        "X-OpenWebUI-User-Role": user.role,
+                    }
+                    if ENABLE_FORWARD_USER_INFO_HEADERS and user
+                    else {}
+                ),
+            },
             data=form_data.model_dump_json(exclude_none=True).encode(),
         )
         r.raise_for_status()
@@ -842,7 +957,7 @@ async def embed(
     log.info(f"generate_ollama_batch_embeddings {form_data}")
 
     if url_idx is None:
-        await get_all_models(request)
+        await get_all_models(request, user=user)
         models = request.app.state.OLLAMA_MODELS
 
         model = form_data.model
@@ -879,7 +994,20 @@ async def embed(
         r = requests.request(
             method="POST",
             url=f"{url}/api/embed",
-            headers=headers,
+            headers={
+                "Content-Type": "application/json",
+                **({"Authorization": f"Bearer {key}"} if key else {}),
+                **(
+                    {
+                        "X-OpenWebUI-User-Name": user.name,
+                        "X-OpenWebUI-User-Id": user.id,
+                        "X-OpenWebUI-User-Email": user.email,
+                        "X-OpenWebUI-User-Role": user.role,
+                    }
+                    if ENABLE_FORWARD_USER_INFO_HEADERS and user
+                    else {}
+                ),
+            },
             data=form_data.model_dump_json(exclude_none=True).encode(),
         )
         r.raise_for_status()
@@ -922,7 +1050,7 @@ async def embeddings(
     log.info(f"generate_ollama_embeddings {form_data}")
 
     if url_idx is None:
-        await get_all_models(request)
+        await get_all_models(request, user=user)
         models = request.app.state.OLLAMA_MODELS
 
         model = form_data.model
@@ -959,7 +1087,20 @@ async def embeddings(
         r = requests.request(
             method="POST",
             url=f"{url}/api/embeddings",
-            headers=headers,
+            headers={
+                "Content-Type": "application/json",
+                **({"Authorization": f"Bearer {key}"} if key else {}),
+                **(
+                    {
+                        "X-OpenWebUI-User-Name": user.name,
+                        "X-OpenWebUI-User-Id": user.id,
+                        "X-OpenWebUI-User-Email": user.email,
+                        "X-OpenWebUI-User-Role": user.role,
+                    }
+                    if ENABLE_FORWARD_USER_INFO_HEADERS and user
+                    else {}
+                ),
+            },
             data=form_data.model_dump_json(exclude_none=True).encode(),
         )
         r.raise_for_status()
@@ -1008,7 +1149,7 @@ async def generate_completion(
     user=Depends(get_verified_user),
 ):
     if url_idx is None:
-        await get_all_models(request)
+        await get_all_models(request, user=user)
         models = request.app.state.OLLAMA_MODELS
 
         model = form_data.model
@@ -1160,14 +1301,14 @@ async def generate_chat_completion(
     prefix_id = api_config.get("prefix_id", None)
     if prefix_id:
         payload["model"] = payload["model"].replace(f"{prefix_id}.", "")
-
+    # payload["keep_alive"] = -1 # keep alive forever
     return await send_post_request(
         url=f"{url}/api/chat",
         payload=json.dumps(payload),
         stream=form_data.stream,
         key=get_api_key(url_idx, url, request.app.state.config.OLLAMA_API_CONFIGS),
         content_type="application/x-ndjson",
-        user=user,  # Add this
+        user=user,
     )
 
 
@@ -1179,7 +1320,7 @@ class OpenAIChatMessageContent(BaseModel):
 
 class OpenAIChatMessage(BaseModel):
     role: str
-    content: Union[str, list[OpenAIChatMessageContent]]
+    content: Union[Optional[str], list[OpenAIChatMessageContent]]
 
     model_config = ConfigDict(extra="allow")
 
@@ -1363,7 +1504,7 @@ async def get_openai_models(
 
     models = []
     if url_idx is None:
-        model_list = await get_all_models(request)
+        model_list = await get_all_models(request, user=user)
         models = [
             {
                 "id": model["model"],
