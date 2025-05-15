@@ -16,9 +16,13 @@ services:
       - KEYCLOAK_SERVER_URL=http://keycloak:8080
       - KEYCLOAK_REALM=open-webui
       - KEYCLOAK_CLIENT_ID=open-webui-client
-      - KEYCLOAK_CLIENT_SECRET=your-client-secret
+      - KEYCLOAK_CLIENT_SECRET=WWcJRGPJBUS6qIhhED8fZelh7FL0t1ne
       - KEYCLOAK_REDIRECT_URI=http://localhost:8080/oauth/keycloak/callback
       # OAuth Configuration
+      - OPENID_PROVIDER_URL=http://keycloak:8080/realms/open-webui/.well-known/openid-configuration
+      - OAUTH_CLIENT_ID=open-webui-client
+      - OAUTH_CLIENT_SECRET=WWcJRGPJBUS6qIhhED8fZelh7FL0t1ne
+      - OPENID_REDIRECT_URI=http://localhost:8080/oauth/oidc/callback
       - OAUTH_PROVIDER_NAME=Keycloak
       - OAUTH_SCOPES=openid email profile
       - OAUTH_EMAIL_CLAIM=email
