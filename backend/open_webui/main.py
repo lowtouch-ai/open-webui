@@ -335,6 +335,7 @@ from open_webui.env import (
     SAFE_MODE,
     SRC_LOG_LEVELS,
     VERSION,
+    KEYCLOAK_ENABLED,
     WEBUI_BUILD_HASH,
     WEBUI_SECRET_KEY,
     WEBUI_SESSION_COOKIE_SAME_SITE,
@@ -1414,6 +1415,15 @@ if len(OAUTH_PROVIDERS) > 0:
 @app.get("/oauth/{provider}/login")
 async def oauth_login(provider: str, request: Request):
     return await oauth_manager.handle_login(request, provider)
+
+
+@app.get("/auth/login")
+async def auth_login(request: Request):
+    # If Keycloak is enabled, redirect to Keycloak login by default
+    if KEYCLOAK_ENABLED:
+        return await oauth_manager.handle_login(request, "keycloak")
+    # Otherwise, redirect to the default login page
+    return RedirectResponse(url="/")
 
 
 # OAuth login logic is as follows:

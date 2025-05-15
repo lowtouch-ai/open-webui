@@ -447,6 +447,17 @@ if OFFLINE_MODE:
     os.environ["HF_HUB_OFFLINE"] = "1"
 
 ####################################
+# KEYCLOAK SETTINGS
+####################################
+
+KEYCLOAK_ENABLED = os.environ.get("KEYCLOAK_ENABLED", "false").lower() == "true"
+KEYCLOAK_SERVER_URL = os.environ.get("KEYCLOAK_SERVER_URL", "")
+KEYCLOAK_REALM = os.environ.get("KEYCLOAK_REALM", "")
+KEYCLOAK_CLIENT_ID = os.environ.get("KEYCLOAK_CLIENT_ID", "")
+KEYCLOAK_CLIENT_SECRET = os.environ.get("KEYCLOAK_CLIENT_SECRET", "")
+KEYCLOAK_REDIRECT_URI = os.environ.get("KEYCLOAK_REDIRECT_URI", "")
+
+####################################
 # AUDIT LOGGING
 ####################################
 # Where to store log file

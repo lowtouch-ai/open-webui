@@ -27,6 +27,12 @@ from open_webui.env import (
     WEBUI_AUTH,
     WEBUI_FAVICON_URL,
     WEBUI_NAME,
+    KEYCLOAK_ENABLED,
+    KEYCLOAK_SERVER_URL,
+    KEYCLOAK_REALM,
+    KEYCLOAK_CLIENT_ID,
+    KEYCLOAK_CLIENT_SECRET,
+    KEYCLOAK_REDIRECT_URI,
     log,
 )
 from open_webui.internal.db import Base, get_db
@@ -542,6 +548,31 @@ OAUTH_ALLOWED_DOMAINS = PersistentConfig(
 
 def load_oauth_providers():
     OAUTH_PROVIDERS.clear()
+    
+    # Add Keycloak provider if enabled
+    if KEYCLOAK_ENABLED and KEYCLOAK_SERVER_URL and KEYCLOAK_REALM and KEYCLOAK_CLIENT_ID:
+        
+        def keycloak_oauth_register(client):
+            well_known_url = f"{KEYCLOAK_SERVER_URL}/realms/{KEYCLOAK_REALM}/.well-known/openid-configuration"
+            client_kwargs = {
+                "scope": "openid email profile",
+            }
+            
+            client.register(
+                name="keycloak",
+                client_id=KEYCLOAK_CLIENT_ID,
+                client_secret=KEYCLOAK_CLIENT_SECRET,
+                server_metadata_url=well_known_url,
+                client_kwargs=client_kwargs,
+                redirect_uri=KEYCLOAK_REDIRECT_URI or f"http://localhost:8080/auth/callback/keycloak",
+            )
+        
+        OAUTH_PROVIDERS["keycloak"] = {
+            "name": "Keycloak",
+            "redirect_uri": KEYCLOAK_REDIRECT_URI or f"http://localhost:8080/auth/callback/keycloak",
+            "register": keycloak_oauth_register,
+        }
+    
     if GOOGLE_CLIENT_ID.value and GOOGLE_CLIENT_SECRET.value:
 
         def google_oauth_register(client):
