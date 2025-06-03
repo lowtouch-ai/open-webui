@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
-from typing import Optional
+from typing import Optional, List
 
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.config import get_config, save_config
@@ -63,6 +63,64 @@ async def set_direct_connections_config(
     )
     return {
         "ENABLE_DIRECT_CONNECTIONS": request.app.state.config.ENABLE_DIRECT_CONNECTIONS,
+    }
+
+
+############################
+# Agent Connections Config
+############################
+
+class AgentConnection(BaseModel):
+    name: str
+    value: str
+    agent_id: Optional[str] = None
+    is_common: bool = False
+    
+    model_config = ConfigDict(extra="allow")
+
+
+class AgentConnectionsConfigForm(BaseModel):
+    AGENT_CONNECTIONS: List[AgentConnection] = []
+
+
+@router.get("/agent_connections", response_model=AgentConnectionsConfigForm)
+async def get_agent_connections_config(request: Request, user=Depends(get_verified_user)):
+    # Only return connections that are common or associated with the user's agent
+    if not hasattr(request.app.state.config, "AGENT_CONNECTIONS"):
+        request.app.state.config.AGENT_CONNECTIONS = []
+    
+    # Admin users can see all connections
+    if user.role == "admin":
+        return {
+            "AGENT_CONNECTIONS": request.app.state.config.AGENT_CONNECTIONS,
+        }
+    
+    # Regular users can only see common connections or ones associated with their agents
+    # Check if user has agents property
+    user_agents = getattr(user, 'agents', [])
+    
+    user_connections = [
+        conn for conn in request.app.state.config.AGENT_CONNECTIONS
+        if conn.get("is_common", False) or (conn.get("agent_id") and conn.get("agent_id") in user_agents)
+    ]
+    
+    return {
+        "AGENT_CONNECTIONS": user_connections,
+    }
+
+
+@router.post("/agent_connections", response_model=AgentConnectionsConfigForm)
+async def set_agent_connections_config(
+    request: Request,
+    form_data: AgentConnectionsConfigForm,
+    user=Depends(get_admin_user),
+):
+    request.app.state.config.AGENT_CONNECTIONS = [
+        connection.model_dump() for connection in form_data.AGENT_CONNECTIONS
+    ]
+    
+    return {
+        "AGENT_CONNECTIONS": request.app.state.config.AGENT_CONNECTIONS,
     }
 
 
