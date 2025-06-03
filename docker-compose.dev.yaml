@@ -1,0 +1,58 @@
+services:
+  ollama:
+    volumes:
+      - ollama:/root/.ollama
+    container_name: ollama-dev
+    pull_policy: always
+    tty: true
+    restart: unless-stopped
+    image: ollama/ollama:${OLLAMA_DOCKER_TAG-latest}
+
+  open-webui-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: open-webui-backend-dev
+    volumes:
+      - ./backend:/app/backend
+      - open-webui:/app/backend/data
+    depends_on:
+      - ollama
+    ports:
+      - "8000:8000"
+    environment:
+      - 'OLLAMA_BASE_URL=http://ollama:11434'
+      - 'WEBUI_SECRET_KEY='
+      - 'WEBUI_PORT=8000'
+      - 'WEBUI_HOST=0.0.0.0'
+      - 'DEBUG=true'
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    restart: unless-stopped
+    command: uvicorn open_webui.main:app --host 0.0.0.0 --port 8000 --reload
+
+  open-webui-frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend.dev
+    container_name: open-webui-frontend-dev
+    volumes:
+      - ./src:/app/src
+      - ./static:/app/static
+      - ./svelte.config.js:/app/svelte.config.js
+      - ./tailwind.config.js:/app/tailwind.config.js
+      - ./postcss.config.js:/app/postcss.config.js
+      - ./vite.config.ts:/app/vite.config.ts
+      - ./tsconfig.json:/app/tsconfig.json
+    ports:
+      - "${OPEN_WEBUI_PORT-3000}:5173"
+    environment:
+      - 'VITE_WEBUI_BACKEND_URL=http://localhost:8000'
+    depends_on:
+      - open-webui-backend
+    restart: unless-stopped
+    command: npm run dev -- --host 0.0.0.0
+
+volumes:
+  ollama: {}
+  open-webui: {}
