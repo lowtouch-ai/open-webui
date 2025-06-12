@@ -49,6 +49,8 @@ services:
       - 'WEBUI_PORT=8000'
       - 'WEBUI_HOST=0.0.0.0'
       - 'DEBUG=true'
+      # CORS configuration for development
+      - 'CORS_ALLOW_ORIGIN=http://openwebui-pcpl.com:3000'
       # Vault integration configuration
       - 'ENABLE_VAULT_INTEGRATION=true'
       - 'VAULT_URL=http://vault:8200'
