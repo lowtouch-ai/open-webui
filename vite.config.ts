@@ -30,6 +30,13 @@ export default defineConfig({
 			]
 		})
 	],
+	server: {
+		host: '0.0.0.0',
+		port: 5173,
+		proxy: {},
+		cors: true,
+		allowedHosts: ['localhost', '127.0.0.1', 'openwebui-pcpl.com']
+	},
 	define: {
 		APP_VERSION: JSON.stringify(process.env.npm_package_version),
 		APP_BUILD_HASH: JSON.stringify(process.env.APP_BUILD_HASH || 'dev-build')
