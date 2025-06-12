@@ -863,6 +863,25 @@ app.add_middleware(
 )
 
 
+class StaticCORSMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        
+        # Add CORS headers to static file responses
+        if request.url.path.startswith("/static/") or request.url.path.startswith("/cache/"):
+            origin = request.headers.get("origin")
+            if origin and (origin in CORS_ALLOW_ORIGIN or "*" in CORS_ALLOW_ORIGIN):
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+                response.headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS"
+                response.headers["Access-Control-Allow-Headers"] = "Origin, Accept, Authorization, Content-Type, X-Requested-With"
+        
+        return response
+
+
+app.add_middleware(StaticCORSMiddleware)
+
+
 app.mount("/ws", socket_app)
 
 

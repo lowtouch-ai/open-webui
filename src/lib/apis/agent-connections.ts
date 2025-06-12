@@ -12,7 +12,7 @@ export interface AgentConnectionsConfig {
 }
 
 export const getAgentConnectionsConfig = async (token: string) => {
-	const response = await fetch(`${WEBUI_BASE_URL}/api/configs/agent_connections`, {
+	const response = await fetch(`${WEBUI_BASE_URL}/api/v1/configs/agent_connections`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json',
@@ -31,7 +31,7 @@ export const setAgentConnectionsConfig = async (
 	token: string,
 	config: AgentConnectionsConfig
 ) => {
-	const response = await fetch(`${WEBUI_BASE_URL}/api/configs/agent_connections`, {
+	const response = await fetch(`${WEBUI_BASE_URL}/api/v1/configs/agent_connections`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json',
