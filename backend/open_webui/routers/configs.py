@@ -1,11 +1,15 @@
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.config import get_config, save_config
 from open_webui.config import BannerModel
+from open_webui.config import ENABLE_VAULT_INTEGRATION, VAULT_URL, VAULT_TOKEN, VAULT_MOUNT_PATH, VAULT_VERSION, VAULT_TIMEOUT, VAULT_VERIFY_SSL
+
+from open_webui.utils.tools import get_tool_server_data, get_tool_servers_data
+from open_webui.utils.vault import test_vault_connection, store_agent_connection_in_vault, get_agent_connection_from_vault, delete_agent_connection_from_vault
 
 
 router = APIRouter()
@@ -64,6 +68,257 @@ async def set_direct_connections_config(
     return {
         "ENABLE_DIRECT_CONNECTIONS": request.app.state.config.ENABLE_DIRECT_CONNECTIONS,
     }
+
+
+############################
+# ToolServers Config
+############################
+
+
+class ToolServerConnection(BaseModel):
+    url: str
+    path: str
+    auth_type: Optional[str]
+    key: Optional[str]
+    config: Optional[dict]
+
+    model_config = ConfigDict(extra="allow")
+
+
+class ToolServersConfigForm(BaseModel):
+    TOOL_SERVER_CONNECTIONS: list[ToolServerConnection]
+
+
+@router.get("/tool_servers", response_model=ToolServersConfigForm)
+async def get_tool_servers_config(request: Request, user=Depends(get_admin_user)):
+    return {
+        "TOOL_SERVER_CONNECTIONS": request.app.state.config.TOOL_SERVER_CONNECTIONS,
+    }
+
+
+@router.post("/tool_servers", response_model=ToolServersConfigForm)
+async def set_tool_servers_config(
+    request: Request,
+    form_data: ToolServersConfigForm,
+    user=Depends(get_admin_user),
+):
+    request.app.state.config.TOOL_SERVER_CONNECTIONS = [
+        connection.model_dump() for connection in form_data.TOOL_SERVER_CONNECTIONS
+    ]
+
+    request.app.state.TOOL_SERVERS = await get_tool_servers_data(
+        request.app.state.config.TOOL_SERVER_CONNECTIONS
+    )
+
+    return {
+        "TOOL_SERVER_CONNECTIONS": request.app.state.config.TOOL_SERVER_CONNECTIONS,
+    }
+
+
+@router.post("/tool_servers/verify")
+async def verify_tool_servers_config(
+    request: Request, form_data: ToolServerConnection, user=Depends(get_admin_user)
+):
+    """
+    Verify the connection to the tool server.
+    """
+    try:
+
+        token = None
+        if form_data.auth_type == "bearer":
+            token = form_data.key
+        elif form_data.auth_type == "session":
+            token = request.state.token.credentials
+
+        url = f"{form_data.url}/{form_data.path}"
+        return await get_tool_server_data(token, url)
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to connect to the tool server: {str(e)}",
+        )
+
+
+############################
+# Agent Connections Config
+############################
+
+class AgentConnection(BaseModel):
+    name: str
+    value: str
+    agent_id: Optional[str] = None
+    is_common: bool = False
+    
+    model_config = ConfigDict(extra="allow")
+
+
+class AgentConnectionsConfigForm(BaseModel):
+    AGENT_CONNECTIONS: List[AgentConnection] = []
+
+
+class VaultConfigForm(BaseModel):
+    ENABLE_VAULT_INTEGRATION: bool
+    VAULT_URL: str
+    VAULT_TOKEN: str
+    VAULT_MOUNT_PATH: str
+    VAULT_VERSION: int
+    VAULT_TIMEOUT: int
+    VAULT_VERIFY_SSL: bool
+
+
+@router.get("/agent_connections", response_model=AgentConnectionsConfigForm)
+async def get_agent_connections_config(request: Request, user=Depends(get_verified_user)):
+    # Only return connections that are common or associated with the user's agent
+    if not hasattr(request.app.state.config, "AGENT_CONNECTIONS"):
+        request.app.state.config.AGENT_CONNECTIONS = []
+    
+    # Admin users can see all connections
+    if user.role == "admin":
+        connections = request.app.state.config.AGENT_CONNECTIONS
+        
+        # If Vault integration is enabled, fetch secrets from Vault
+        if ENABLE_VAULT_INTEGRATION.value:
+            updated_connections = []
+            for conn in connections:
+                # Try to get the value from Vault
+                vault_value = get_agent_connection_from_vault(
+                    name=conn.get("name"),
+                    is_common=conn.get("is_common", False),
+                    agent_id=conn.get("agent_id")
+                )
+                
+                # If found in Vault, use that value
+                if vault_value is not None:
+                    conn_copy = dict(conn)
+                    conn_copy["value"] = vault_value
+                    updated_connections.append(conn_copy)
+                else:
+                    updated_connections.append(conn)
+            
+            return {"AGENT_CONNECTIONS": updated_connections}
+        
+        return {"AGENT_CONNECTIONS": connections}
+    
+    # Regular users can only see common connections or ones associated with their agents
+    # Check if user has agents property
+    user_agents = getattr(user, 'agents', [])
+    
+    user_connections = [
+        conn for conn in request.app.state.config.AGENT_CONNECTIONS
+        if conn.get("is_common", False) or (conn.get("agent_id") and conn.get("agent_id") in user_agents)
+    ]
+    
+    # If Vault integration is enabled, fetch secrets from Vault
+    if ENABLE_VAULT_INTEGRATION.value:
+        updated_connections = []
+        for conn in user_connections:
+            # Try to get the value from Vault
+            vault_value = get_agent_connection_from_vault(
+                name=conn.get("name"),
+                is_common=conn.get("is_common", False),
+                agent_id=conn.get("agent_id")
+            )
+            
+            # If found in Vault, use that value
+            if vault_value is not None:
+                conn_copy = dict(conn)
+                conn_copy["value"] = vault_value
+                updated_connections.append(conn_copy)
+            else:
+                updated_connections.append(conn)
+        
+        return {"AGENT_CONNECTIONS": updated_connections}
+    
+    return {"AGENT_CONNECTIONS": user_connections}
+
+
+@router.post("/agent_connections", response_model=AgentConnectionsConfigForm)
+async def set_agent_connections_config(
+    request: Request,
+    form_data: AgentConnectionsConfigForm,
+    user=Depends(get_admin_user),
+):
+    connections = [connection.model_dump() for connection in form_data.AGENT_CONNECTIONS]
+    
+    # If Vault integration is enabled, store secrets in Vault
+    if ENABLE_VAULT_INTEGRATION.value:
+        for connection in connections:
+            # Store the secret in Vault
+            success = store_agent_connection_in_vault(connection)
+            
+            # If successfully stored in Vault, remove the value from the connection
+            # to avoid storing it in the database
+            if success:
+                # Keep a placeholder value to indicate it's stored in Vault
+                connection["value"] = "[STORED_IN_VAULT]"
+    
+    request.app.state.config.AGENT_CONNECTIONS = connections
+    
+    return {
+        "AGENT_CONNECTIONS": request.app.state.config.AGENT_CONNECTIONS,
+    }
+
+
+@router.get("/agent_connections/vault_config", response_model=VaultConfigForm)
+async def get_vault_config(request: Request, user=Depends(get_admin_user)):
+    """Get the Vault configuration."""
+    return {
+        "ENABLE_VAULT_INTEGRATION": ENABLE_VAULT_INTEGRATION.value,
+        "VAULT_URL": VAULT_URL.value,
+        "VAULT_TOKEN": VAULT_TOKEN.value,
+        "VAULT_MOUNT_PATH": VAULT_MOUNT_PATH.value,
+        "VAULT_VERSION": VAULT_VERSION.value,
+        "VAULT_TIMEOUT": VAULT_TIMEOUT.value,
+        "VAULT_VERIFY_SSL": VAULT_VERIFY_SSL.value,
+    }
+
+
+@router.post("/agent_connections/vault_config", response_model=VaultConfigForm)
+async def set_vault_config(
+    request: Request,
+    form_data: VaultConfigForm,
+    user=Depends(get_admin_user),
+):
+    """Set the Vault configuration."""
+    ENABLE_VAULT_INTEGRATION.value = form_data.ENABLE_VAULT_INTEGRATION
+    VAULT_URL.value = form_data.VAULT_URL
+    VAULT_TOKEN.value = form_data.VAULT_TOKEN
+    VAULT_MOUNT_PATH.value = form_data.VAULT_MOUNT_PATH
+    VAULT_VERSION.value = form_data.VAULT_VERSION
+    VAULT_TIMEOUT.value = form_data.VAULT_TIMEOUT
+    VAULT_VERIFY_SSL.value = form_data.VAULT_VERIFY_SSL
+    
+    return {
+        "ENABLE_VAULT_INTEGRATION": ENABLE_VAULT_INTEGRATION.value,
+        "VAULT_URL": VAULT_URL.value,
+        "VAULT_TOKEN": VAULT_TOKEN.value,
+        "VAULT_MOUNT_PATH": VAULT_MOUNT_PATH.value,
+        "VAULT_VERSION": VAULT_VERSION.value,
+        "VAULT_TIMEOUT": VAULT_TIMEOUT.value,
+        "VAULT_VERIFY_SSL": VAULT_VERIFY_SSL.value,
+    }
+
+
+@router.post("/agent_connections/test_vault_connection")
+async def test_vault_connection_endpoint(
+    request: Request,
+    form_data: VaultConfigForm,
+    user=Depends(get_admin_user),
+):
+    """Test the connection to Vault."""
+    success, message = test_vault_connection(
+        url=form_data.VAULT_URL,
+        token=form_data.VAULT_TOKEN,
+        mount_path=form_data.VAULT_MOUNT_PATH,
+        kv_version=form_data.VAULT_VERSION,
+        timeout=form_data.VAULT_TIMEOUT,
+        verify_ssl=form_data.VAULT_VERIFY_SSL
+    )
+    
+    if success:
+        return {"status": "success", "message": message}
+    else:
+        raise HTTPException(status_code=400, detail=message)
 
 
 ############################

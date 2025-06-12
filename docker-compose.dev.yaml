@@ -1,0 +1,91 @@
+services:
+  ollama:
+    volumes:
+      - ollama:/root/.ollama
+    container_name: ollama-dev
+    pull_policy: always
+    tty: true
+    restart: unless-stopped
+    image: ollama/ollama:${OLLAMA_DOCKER_TAG-latest}
+
+  vault:
+    image: hashicorp/vault:latest
+    container_name: vault-dev
+    ports:
+      - "8200:8200"
+    environment:
+      - VAULT_DEV_ROOT_TOKEN_ID=dev-root-token
+      - VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200
+      - VAULT_ADDR=http://0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    volumes:
+      - vault-data:/vault/data
+    command: vault server -dev -dev-listen-address=0.0.0.0:8200
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    profiles:
+      - vault  # Optional service, start with: docker-compose --profile vault up
+
+  open-webui-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: open-webui-backend-dev
+    volumes:
+      - ./backend:/app/backend
+      - open-webui:/app/backend/data
+    depends_on:
+      - ollama
+    ports:
+      - "8000:8000"
+    environment:
+      - 'OLLAMA_BASE_URL=http://ollama:11434'
+      - 'WEBUI_SECRET_KEY=your-secure-secret-key-here'
+      - 'WEBUI_PORT=8000'
+      - 'WEBUI_HOST=0.0.0.0'
+      - 'DEBUG=true'
+      # Vault integration configuration
+      - 'ENABLE_VAULT_INTEGRATION=true'
+      - 'VAULT_URL=http://vault:8200'
+      - 'VAULT_TOKEN=dev-root-token'
+      - 'VAULT_MOUNT_PATH=secret'
+      - 'VAULT_KV_VERSION=2'
+      - 'VAULT_TIMEOUT=30'
+      - 'VAULT_VERIFY_SSL=false'
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    restart: unless-stopped
+    command: uvicorn open_webui.main:app --host 0.0.0.0 --port 8000 --reload
+
+  open-webui-frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend.dev
+    container_name: open-webui-frontend-dev
+    volumes:
+      - ./src:/app/src
+      - ./static:/app/static
+      - ./scripts:/app/scripts
+      - ./svelte.config.js:/app/svelte.config.js
+      - ./tailwind.config.js:/app/tailwind.config.js
+      - ./postcss.config.js:/app/postcss.config.js
+      - ./vite.config.ts:/app/vite.config.ts
+      - ./tsconfig.json:/app/tsconfig.json
+    ports:
+      - "${OPEN_WEBUI_PORT-3000}:5173"
+    environment:
+      - 'VITE_WEBUI_BACKEND_URL=http://openwebui-pcpl.com:8000'
+    depends_on:
+      - open-webui-backend
+    restart: unless-stopped
+    command: npm run dev -- --host 0.0.0.0
+
+volumes:
+  ollama: {}
+  open-webui: {}
+  vault-data: {}
