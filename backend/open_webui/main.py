@@ -107,6 +107,8 @@ from open_webui.config import (
     ENABLE_DIRECT_CONNECTIONS,
     # Tool Server Configs
     TOOL_SERVER_CONNECTIONS,
+    # Agent Connections
+    AGENT_CONNECTIONS,
     # Code Execution
     ENABLE_CODE_EXECUTION,
     CODE_EXECUTION_ENGINE,
@@ -501,6 +503,14 @@ app.state.OPENAI_MODELS = {}
 
 app.state.config.TOOL_SERVER_CONNECTIONS = TOOL_SERVER_CONNECTIONS
 app.state.TOOL_SERVERS = []
+
+########################################
+#
+# AGENT CONNECTIONS
+#
+########################################
+
+app.state.config.AGENT_CONNECTIONS = AGENT_CONNECTIONS
 
 ########################################
 #
@@ -931,6 +941,25 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class StaticCORSMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        
+        # Add CORS headers to static file responses
+        if request.url.path.startswith("/static/") or request.url.path.startswith("/cache/"):
+            origin = request.headers.get("origin")
+            if origin and (origin in CORS_ALLOW_ORIGIN or "*" in CORS_ALLOW_ORIGIN):
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+                response.headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS"
+                response.headers["Access-Control-Allow-Headers"] = "Origin, Accept, Authorization, Content-Type, X-Requested-With"
+        
+        return response
+
+
+app.add_middleware(StaticCORSMiddleware)
 
 
 app.mount("/ws", socket_app)

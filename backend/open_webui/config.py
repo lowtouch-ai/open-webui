@@ -916,6 +916,16 @@ TOOL_SERVER_CONNECTIONS = PersistentConfig(
 )
 
 ####################################
+# AGENT_CONNECTIONS
+####################################
+
+AGENT_CONNECTIONS = PersistentConfig(
+    "AGENT_CONNECTIONS",
+    "agent.connections",
+    [],
+)
+
+####################################
 # WEBUI
 ####################################
 

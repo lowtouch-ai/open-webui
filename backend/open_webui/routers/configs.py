@@ -168,13 +168,15 @@ class VaultConfigForm(BaseModel):
 
 @router.get("/agent_connections", response_model=AgentConnectionsConfigForm)
 async def get_agent_connections_config(request: Request, user=Depends(get_verified_user)):
-    # Only return connections that are common or associated with the user's agent
-    if not hasattr(request.app.state.config, "AGENT_CONNECTIONS"):
-        request.app.state.config.AGENT_CONNECTIONS = []
-    
     # Admin users can see all connections
     if user.role == "admin":
-        connections = request.app.state.config.AGENT_CONNECTIONS
+        # Handle case where AGENT_CONNECTIONS might be a list instead of PersistentConfig
+        agent_connections = request.app.state.config.AGENT_CONNECTIONS
+        if hasattr(agent_connections, 'value'):
+            connections = agent_connections.value
+        else:
+            # If it's already a list, use it directly
+            connections = agent_connections if isinstance(agent_connections, list) else []
         
         # If Vault integration is enabled, fetch secrets from Vault
         if ENABLE_VAULT_INTEGRATION.value:
@@ -203,8 +205,15 @@ async def get_agent_connections_config(request: Request, user=Depends(get_verifi
     # Check if user has agents property
     user_agents = getattr(user, 'agents', [])
     
+    # Handle case where AGENT_CONNECTIONS might be a list instead of PersistentConfig
+    agent_connections = request.app.state.config.AGENT_CONNECTIONS
+    if hasattr(agent_connections, 'value'):
+        all_connections = agent_connections.value
+    else:
+        all_connections = agent_connections if isinstance(agent_connections, list) else []
+    
     user_connections = [
-        conn for conn in request.app.state.config.AGENT_CONNECTIONS
+        conn for conn in all_connections
         if conn.get("is_common", False) or (conn.get("agent_id") and conn.get("agent_id") in user_agents)
     ]
     
@@ -252,11 +261,19 @@ async def set_agent_connections_config(
                 # Keep a placeholder value to indicate it's stored in Vault
                 connection["value"] = "[STORED_IN_VAULT]"
     
-    request.app.state.config.AGENT_CONNECTIONS = connections
+    # Update the PersistentConfig value (or set directly if it's a list)
+    agent_connections = request.app.state.config.AGENT_CONNECTIONS
+    if hasattr(agent_connections, 'value'):
+        agent_connections.value = connections
+    else:
+        # If it's not a PersistentConfig, set it directly
+        request.app.state.config.AGENT_CONNECTIONS = connections
     
-    return {
-        "AGENT_CONNECTIONS": request.app.state.config.AGENT_CONNECTIONS,
-    }
+    # Return the current value
+    if hasattr(request.app.state.config.AGENT_CONNECTIONS, 'value'):
+        return {"AGENT_CONNECTIONS": request.app.state.config.AGENT_CONNECTIONS.value}
+    else:
+        return {"AGENT_CONNECTIONS": request.app.state.config.AGENT_CONNECTIONS}
 
 
 @router.get("/agent_connections/vault_config", response_model=VaultConfigForm)
