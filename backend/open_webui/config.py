@@ -2463,3 +2463,49 @@ LDAP_CA_CERT_FILE = PersistentConfig(
 LDAP_CIPHERS = PersistentConfig(
     "LDAP_CIPHERS", "ldap.server.ciphers", os.environ.get("LDAP_CIPHERS", "ALL")
 )
+
+####################################
+# HashiCorp Vault Integration
+####################################
+
+ENABLE_VAULT_INTEGRATION = PersistentConfig(
+    "ENABLE_VAULT_INTEGRATION",
+    "vault.enable",
+    os.environ.get("ENABLE_VAULT_INTEGRATION", "false").lower() == "true",
+)
+
+VAULT_URL = PersistentConfig(
+    "VAULT_URL",
+    "vault.url",
+    os.environ.get("VAULT_URL", "http://localhost:8200"),
+)
+
+VAULT_TOKEN = PersistentConfig(
+    "VAULT_TOKEN",
+    "vault.token",
+    os.environ.get("VAULT_TOKEN", ""),
+)
+
+VAULT_MOUNT_PATH = PersistentConfig(
+    "VAULT_MOUNT_PATH",
+    "vault.mount_path",
+    os.environ.get("VAULT_MOUNT_PATH", "secret"),
+)
+
+VAULT_VERSION = PersistentConfig(
+    "VAULT_VERSION",
+    "vault.version",
+    int(os.environ.get("VAULT_VERSION", "2")),
+)
+
+VAULT_TIMEOUT = PersistentConfig(
+    "VAULT_TIMEOUT",
+    "vault.timeout",
+    int(os.environ.get("VAULT_TIMEOUT", "30")),
+)
+
+VAULT_VERIFY_SSL = PersistentConfig(
+    "VAULT_VERIFY_SSL",
+    "vault.verify_ssl",
+    os.environ.get("VAULT_VERIFY_SSL", "true").lower() == "true",
+)
