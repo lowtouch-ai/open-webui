@@ -73,6 +73,11 @@
 		}
 	};
 
+	// Validate connection name (alphanumeric, no spaces)
+	const validateConnectionName = (name: string): boolean => {
+		return /^[a-zA-Z0-9_]+$/.test(name);
+	};
+
 	const addConnection = (connection: AgentConnection) => {
 		agentConnections = [...agentConnections, connection];
 		saveConfig();
@@ -194,6 +199,11 @@
 						
 						if (!name) {
 							toast.error($i18n.t('Name is required'));
+							return;
+						}
+
+						if (!validateConnectionName(name)) {
+							toast.error($i18n.t('Name must be alphanumeric with no spaces'));
 							return;
 						}
 
@@ -327,6 +337,11 @@
 							
 							if (!editName) {
 								toast.error($i18n.t('Name is required'));
+								return;
+							}
+
+							if (!validateConnectionName(editName)) {
+								toast.error($i18n.t('Name must be alphanumeric with no spaces'));
 								return;
 							}
 
