@@ -18,9 +18,9 @@
 <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
   <thead class="bg-gray-50 dark:bg-gray-800">
     <tr>
-      <th class="px-4 py-2 text-left font-semibold">Name</th>
-      <th class="px-4 py-2 text-left font-semibold">Scope</th>
-      <th class="px-4 py-2 text-center font-semibold">Actions</th>
+      <th class="px-4 py-2 text-left font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 text-xs">Name</th>
+      <th class="px-4 py-2 text-left font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 text-xs">Scope</th>
+      <th class="px-4 py-2 text-center font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 text-xs">Actions</th>
     </tr>
   </thead>
   <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
@@ -57,8 +57,4 @@
   </tbody>
 </table>
 
-<style>
-  th {
-    @apply uppercase text-xs tracking-wide text-gray-500 dark:text-gray-400;
-  }
-</style>
+
