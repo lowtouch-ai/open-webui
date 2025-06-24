@@ -83,6 +83,10 @@
 			return;
 		}
 
+		// Extract agent ID from the model
+		const { extractAgentIdFromModel } = await import('$lib/utils/agent-connections');
+		const agentId = extractAgentIdFromModel(model);
+
 		const [res, controller] = await chatCompletion(
 			localStorage.token,
 			{
@@ -98,7 +102,8 @@
 					...messages
 				].filter((message) => message)
 			},
-			`${WEBUI_BASE_URL}/api`
+			`${WEBUI_BASE_URL}/api`,
+			agentId
 		);
 
 		let responseMessage;
