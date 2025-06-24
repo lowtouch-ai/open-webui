@@ -41,12 +41,18 @@ $: filteredConnections = agentConnections.filter((c) => {
 	if (!term) return true;
 	return (
 		c.name.toLowerCase().includes(term) ||
-		(c.agent_id || '').toLowerCase().includes(term)
+		(c.agent_id || '').toLowerCase().includes(term) ||
+		(c.value || '').toLowerCase().includes(term)
 	);
 });
 
 $: totalPages = Math.max(1, Math.ceil(filteredConnections.length / pageSize));
 $: paginatedConnections = filteredConnections.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+// Reset to first page when search results change
+$: if (searchTerm !== undefined) {
+	currentPage = 1;
+}
 
 function goToPage(p: number) {
 	currentPage = Math.min(Math.max(1, p), totalPages);
@@ -103,6 +109,9 @@ function goToPage(p: number) {
 
 	const addConnection = (connection: AgentConnection) => {
 		agentConnections = [...agentConnections, connection];
+		// Reset search to show the newly added connection
+		searchTerm = '';
+		currentPage = 1;
 		saveConfig();
 	};
 
@@ -162,11 +171,22 @@ function goToPage(p: number) {
 			on:edit={(e) => {
 				const { index } = e.detail;
 				editConnection = paginatedConnections[index];
+				// Store the original index for reliable updates
+				editConnection._originalIndex = agentConnections.findIndex(conn => 
+					conn.name === editConnection.name && 
+					conn.value === editConnection.value && 
+					conn.agent_id === editConnection.agent_id
+				);
 			}}
 			on:delete={(e) => {
 				const { index } = e.detail;
 				// Need original index in agentConnections array
-				const globalIndex = agentConnections.indexOf(paginatedConnections[index]);
+				const globalIndex = agentConnections.findIndex(conn => {
+					const target = paginatedConnections[index];
+					return conn.name === target.name && 
+						   conn.value === target.value && 
+						   conn.agent_id === target.agent_id;
+				});
 				if (globalIndex !== -1) deleteConnection(globalIndex);
 			}}
 		/>
@@ -209,135 +229,6 @@ function goToPage(p: number) {
 		on:save={(e) => addConnection(e.detail.connection)}
 	/>
 {/if}
-<Modal size="sm" bind:show={showAddModal}>
-	<div>
-		<div class="flex justify-between dark:text-gray-100 px-5 pt-4 pb-2">
-			<div class="text-lg font-medium self-center font-primary">
-				{$i18n.t('Add Agent Connection')}
-			</div>
-			<button
-				class="self-center"
-				on:click={() => {
-					showAddModal = false;
-				}}
-			>
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					viewBox="0 0 20 20"
-					fill="currentColor"
-					class="w-5 h-5"
-				>
-					<path
-						d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
-					/>
-				</svg>
-			</button>
-		</div>
-
-		<div class="flex flex-col md:flex-row w-full px-4 pb-4 md:space-x-4 dark:text-gray-200">
-			<div class="flex flex-col w-full sm:flex-row sm:justify-center sm:space-x-6">
-				<form
-					class="flex flex-col w-full"
-					on:submit={(e) => {
-						e.preventDefault();
-						
-						if (!name) {
-							toast.error($i18n.t('Name is required'));
-							return;
-						}
-
-						if (!validateConnectionName(name)) {
-							toast.error($i18n.t('Name must be alphanumeric with no spaces'));
-							return;
-						}
-
-						if (!value) {
-							toast.error($i18n.t('Value is required'));
-							return;
-						}
-
-						addConnection({
-							name,
-							value,
-							agent_id: agent_id || null,
-							is_common
-						});
-
-						name = '';
-						value = '';
-						agent_id = '';
-						is_common = false;
-						showAddModal = false;
-					}}
-				>
-					<div class="px-1">
-						<div class="flex flex-col w-full mb-2">
-							<div class="mb-0.5 text-xs text-gray-500">{$i18n.t('Name')}</div>
-
-							<div class="flex-1">
-								<input
-									class="w-full text-sm bg-transparent placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-hidden"
-									type="text"
-									bind:value={name}
-									placeholder={$i18n.t('Connection Name')}
-									autocomplete="off"
-									required
-								/>
-							</div>
-						</div>
-
-						<div class="flex flex-col w-full mb-2">
-							<div class="mb-0.5 text-xs text-gray-500">{$i18n.t('Value')}</div>
-
-							<div class="flex-1">
-								<SensitiveInput
-									className="w-full text-sm bg-transparent placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-hidden"
-									bind:value={value}
-									placeholder={$i18n.t('Connection Value')}
-									required={true}
-								/>
-							</div>
-						</div>
-
-						<div class="flex flex-col w-full mb-2">
-							<div class="mb-0.5 text-xs text-gray-500">{$i18n.t('Agent ID (Optional)')}</div>
-
-							<div class="flex-1">
-								<input
-									class="w-full text-sm bg-transparent placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-hidden"
-									type="text"
-									bind:value={agent_id}
-									placeholder={$i18n.t('Leave empty for common connections')}
-									autocomplete="off"
-								/>
-							</div>
-						</div>
-
-						<div class="flex items-center mb-2">
-							<div class="text-xs text-gray-500 mr-2">{$i18n.t('Common Connection')}</div>
-							<Tooltip
-								content={is_common
-									? $i18n.t('This connection is available to all agents')
-									: $i18n.t('This connection is specific to an agent')}
-							>
-								<Switch bind:state={is_common} />
-							</Tooltip>
-						</div>
-					</div>
-
-					<div class="flex justify-end pt-3 text-sm font-medium">
-						<button
-							class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex flex-row space-x-1 items-center"
-							type="submit"
-						>
-							{$i18n.t('Save')}
-						</button>
-					</div>
-				</form>
-			</div>
-		</div>
-	</div>
-</Modal>
 
 {#if editConnection}
 	<ConnectionModal
@@ -346,12 +237,28 @@ function goToPage(p: number) {
 		connection={editConnection}
 		on:close={() => (editConnection = null)}
 		on:save={(e) => {
-			const idx = agentConnections.indexOf(editConnection);
+			// Use the stored original index if available, otherwise fall back to findIndex
+			let idx = editConnection._originalIndex;
+			if (idx === undefined || idx === -1) {
+				idx = agentConnections.findIndex(conn => 
+					conn.name === editConnection.name && 
+					conn.value === editConnection.value && 
+					conn.agent_id === editConnection.agent_id
+				);
+			}
 			if (idx !== -1) updateConnection(e.detail.connection, idx);
 			editConnection = null;
 		}}
 		on:delete={() => {
-			const idx = agentConnections.indexOf(editConnection);
+			// Use the stored original index if available, otherwise fall back to findIndex  
+			let idx = editConnection._originalIndex;
+			if (idx === undefined || idx === -1) {
+				idx = agentConnections.findIndex(conn => 
+					conn.name === editConnection.name && 
+					conn.value === editConnection.value && 
+					conn.agent_id === editConnection.agent_id
+				);
+			}
 			if (idx !== -1) deleteConnection(idx);
 			editConnection = null;
 		}}

@@ -49,15 +49,15 @@ function close() {
 function handleSubmit(e: Event) {
   e.preventDefault();
   if (!name) {
-    toast.error(i18n.t('Name is required'));
+    toast.error($i18n.t('Name is required'));
     return;
   }
   if (!validateConnectionName(name)) {
-    toast.error(i18n.t('Name must be alphanumeric with no spaces'));
+    toast.error($i18n.t('Name must be alphanumeric with no spaces'));
     return;
   }
   if (!value) {
-    toast.error(i18n.t('Value is required'));
+    toast.error($i18n.t('Value is required'));
     return;
   }
   const conn: AgentConnection = {
@@ -80,7 +80,7 @@ function handleDelete() {
   <div>
     <div class="flex justify-between dark:text-gray-100 px-5 pt-4 pb-2">
       <div class="text-lg font-medium self-center font-primary">
-        {mode === 'add' ? i18n.t('Add Agent Connection') : i18n.t('Edit Agent Connection')}
+        {mode === 'add' ? $i18n.t('Add Agent Connection') : $i18n.t('Edit Agent Connection')}
       </div>
       <button class="self-center" on:click={close}>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5">
@@ -94,40 +94,40 @@ function handleDelete() {
         <form class="flex flex-col w-full" on:submit={handleSubmit}>
           <div class="px-1">
             <div class="flex flex-col w-full mb-2">
-              <div class="mb-0.5 text-xs text-gray-500">{i18n.t('Name')}</div>
+              <div class="mb-0.5 text-xs text-gray-500">{$i18n.t('Name')}</div>
               <div class="flex-1">
-                <input class="w-full text-sm bg-transparent placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-hidden" type="text" bind:value={name} placeholder={i18n.t('Connection Name')} autocomplete="off" required />
+                <input class="w-full text-sm bg-transparent placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-hidden" type="text" bind:value={name} placeholder={$i18n.t('Connection Name')} autocomplete="off" required />
               </div>
             </div>
             <div class="flex flex-col w-full mb-2">
-              <div class="mb-0.5 text-xs text-gray-500">{i18n.t('Value')}</div>
+              <div class="mb-0.5 text-xs text-gray-500">{$i18n.t('Value')}</div>
               <div class="flex-1">
                 <SensitiveInput
                   inputClassName="w-full text-sm bg-transparent placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-hidden"
                   bind:value={value}
-                  placeholder={i18n.t('Connection Value')}
+                  placeholder={$i18n.t('Connection Value')}
                   required
                 />
               </div>
             </div>
             <div class="flex flex-col w-full mb-2">
-              <div class="mb-0.5 text-xs text-gray-500">{i18n.t('Agent ID (Optional)')}</div>
+              <div class="mb-0.5 text-xs text-gray-500">{$i18n.t('Agent ID (Optional)')}</div>
               <div class="flex-1">
-                <input class="w-full text-sm bg-transparent placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-hidden" type="text" bind:value={agent_id} placeholder={i18n.t('Leave empty for common connections')} autocomplete="off" />
+                <input class="w-full text-sm bg-transparent placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-hidden" type="text" bind:value={agent_id} placeholder={$i18n.t('Leave empty for common connections')} autocomplete="off" />
               </div>
             </div>
             <div class="flex items-center mb-2">
-              <div class="text-xs text-gray-500 mr-2">{i18n.t('Common Connection')}</div>
-              <Tooltip content={is_common ? i18n.t('This connection is available to all agents') : i18n.t('This connection is specific to an agent')}>
+              <div class="text-xs text-gray-500 mr-2">{$i18n.t('Common Connection')}</div>
+              <Tooltip content={is_common ? $i18n.t('This connection is available to all agents') : $i18n.t('This connection is specific to an agent')}>
                 <Switch bind:state={is_common} />
               </Tooltip>
             </div>
           </div>
           <div class="flex justify-end pt-3 text-sm font-medium gap-1.5">
             {#if mode === 'edit'}
-            <button type="button" class="px-3.5 py-1.5 text-sm font-medium dark:bg-black dark:hover:bg-gray-900 dark:text-white bg-white text-black hover:bg-gray-100 transition rounded-full" on:click={handleDelete}>{i18n.t('Delete')}</button>
+            <button type="button" class="px-3.5 py-1.5 text-sm font-medium dark:bg-black dark:hover:bg-gray-900 dark:text-white bg-white text-black hover:bg-gray-100 transition rounded-full" on:click={handleDelete}>{$i18n.t('Delete')}</button>
             {/if}
-            <button type="submit" class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full">{i18n.t('Save')}</button>
+            <button type="submit" class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full">{$i18n.t('Save')}</button>
           </div>
         </form>
       </div>
