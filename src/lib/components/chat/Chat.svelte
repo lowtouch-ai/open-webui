@@ -1567,6 +1567,10 @@
 			}))
 			.filter((message) => message?.role === 'user' || message?.content?.trim());
 
+		// Extract agent ID from the model
+		const { extractAgentIdFromModel } = await import('$lib/utils/agent-connections');
+		const agentId = extractAgentIdFromModel(model);
+
 		const res = await generateOpenAIChatCompletion(
 			localStorage.token,
 			{
@@ -1647,7 +1651,8 @@
 						}
 					: {})
 			},
-			`${WEBUI_BASE_URL}/api`
+			`${WEBUI_BASE_URL}/api`,
+			agentId
 		).catch(async (error) => {
 			toast.error(`${error}`);
 
