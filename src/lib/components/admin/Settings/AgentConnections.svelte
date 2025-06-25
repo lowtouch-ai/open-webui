@@ -13,6 +13,7 @@
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import ConnectionsTable from './AgentConnections/ConnectionsTable.svelte';
 	import ConnectionModal from './AgentConnections/ConnectionModal.svelte';
 
@@ -30,6 +31,8 @@
 	let agentConnections: AgentConnection[] = [];
 	let showAddModal = false;
 	let editConnection: AgentConnection | null = null;
+	let showDeleteConfirmDialog = false;
+	let deleteTargetIndex = -1;
 
 // Search & pagination
 let searchTerm = '';
@@ -127,6 +130,19 @@ function goToPage(p: number) {
 		saveConfig();
 	};
 
+	const confirmDelete = (index: number) => {
+		deleteTargetIndex = index;
+		showDeleteConfirmDialog = true;
+	};
+
+	const handleDeleteConfirm = () => {
+		if (deleteTargetIndex !== -1) {
+			deleteConnection(deleteTargetIndex);
+			deleteTargetIndex = -1;
+		}
+		showDeleteConfirmDialog = false;
+	};
+
 	onMount(() => {
 		fetchConfig();
 	});
@@ -222,7 +238,7 @@ function goToPage(p: number) {
 						   conn.value === target.value && 
 						   conn.agent_id === target.agent_id;
 				});
-				if (globalIndex !== -1) deleteConnection(globalIndex);
+				if (globalIndex !== -1) confirmDelete(globalIndex);
 			}}
 		/>
 
@@ -266,6 +282,16 @@ function goToPage(p: number) {
 	/>
 {/if}
 
+<!-- Delete Confirmation Dialog -->
+<ConfirmDialog
+	bind:show={showDeleteConfirmDialog}
+	on:confirm={handleDeleteConfirm}
+>
+	<div class="text-sm dark:text-gray-300">
+		{$i18n.t('Are you sure you want to delete this agent connection? This action cannot be undone.')}
+	</div>
+</ConfirmDialog>
+
 {#if editConnection}
 	<ConnectionModal
 		show={true}
@@ -295,7 +321,7 @@ function goToPage(p: number) {
 					conn.agent_id === editConnection.agent_id
 				);
 			}
-			if (idx !== -1) deleteConnection(idx);
+			if (idx !== -1) confirmDelete(idx);
 			editConnection = null;
 		}}
 	/>
