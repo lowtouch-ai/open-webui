@@ -7,6 +7,7 @@ import Modal from '$lib/components/common/Modal.svelte';
 import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 import Switch from '$lib/components/common/Switch.svelte';
 import Tooltip from '$lib/components/common/Tooltip.svelte';
+import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 
 import type { AgentConnection } from '$lib/apis/agent-connections';
 
@@ -24,6 +25,7 @@ let agent_id = '';
 let is_common = false;
 let initialized = false;
 let saving = false;
+let showDeleteConfirmDialog = false;
 
 // Initialize form values when connection changes (only once per connection)
 $: if (mode === 'edit' && connection && !initialized) {
@@ -92,6 +94,10 @@ async function handleSubmit(e: Event) {
 }
 
 function handleDelete() {
+  showDeleteConfirmDialog = true;
+}
+
+function confirmDelete() {
   dispatch('delete');
   close();
 }
@@ -194,3 +200,13 @@ function handleDelete() {
     </div>
   </div>
 </Modal>
+
+<!-- Delete Confirmation Dialog -->
+<ConfirmDialog
+	bind:show={showDeleteConfirmDialog}
+	on:confirm={confirmDelete}
+>
+	<div class="text-sm dark:text-gray-300">
+		{$i18n.t('Are you sure you want to delete this agent connection? This action cannot be undone.')}
+	</div>
+</ConfirmDialog>
