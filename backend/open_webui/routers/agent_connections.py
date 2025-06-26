@@ -8,6 +8,7 @@ from open_webui.utils.vault import (
     store_agent_connection_in_vault,
     get_agent_connection_from_vault,
     delete_agent_connection_from_vault,
+    get_vault_client,
     ENABLE_VAULT_INTEGRATION
 )
 from open_webui.config import ENABLE_VAULT_INTEGRATION as VAULT_CONFIG
@@ -38,7 +39,7 @@ class AgentConnectionUpdate(BaseModel):
     is_common: Optional[bool] = None
 
 
-@router.post("/", response_model=dict)
+@router.post("/", response_model=AgentConnectionResponse)
 async def create_agent_connection(
     connection: AgentConnectionCreate,
     user=Depends(get_verified_user)
@@ -73,10 +74,13 @@ async def create_agent_connection(
         # Generate a key ID (using user_id + key_name + agent_id for uniqueness)
         key_id = f"{user.id}_{connection.key_name}_{connection.agent_id or ('common' if connection.is_common else 'default')}"
         
-        return {
-            "status": "success",
-            "key_id": key_id
-        }
+        return AgentConnectionResponse(
+            key_id=key_id,
+            key_name=connection.key_name,
+            agent_id=connection.agent_id,
+            is_common=connection.is_common,
+            created_at=datetime.now()
+        )
         
     except HTTPException:
         raise
@@ -89,15 +93,56 @@ async def create_agent_connection(
 async def list_agent_connections(user=Depends(get_verified_user)):
     """List keys for a user."""
     try:
-        # For now, we'll return an empty list since we don't have a way to list all keys from Vault
-        # In a real implementation, you'd need to maintain an index of keys in the database
-        # or use Vault's list capabilities
-        
-        # This is a placeholder implementation
-        # In production, you'd want to store metadata about connections in the database
         connections = []
         
-        logger.info(f"Listed agent connections for user {user.id}")
+        if VAULT_CONFIG.value:
+            # Get Vault client
+            vault_client = get_vault_client()
+            if vault_client and vault_client.connect():
+                try:
+                    # List all secrets under users/{user_id}/
+                    user_path = f"users/{user.id}"
+                    
+                    # Use Vault's list capability for KV v2
+                    if vault_client.kv_version == 2:
+                        response = vault_client.client.secrets.kv.v2.list_secrets(
+                            path=user_path,
+                            mount_point=vault_client.mount_path
+                        )
+                    else:
+                        response = vault_client.client.secrets.kv.v1.list_secrets(
+                            path=user_path,
+                            mount_point=vault_client.mount_path
+                        )
+                    
+                    if response and 'data' in response and 'keys' in response['data']:
+                        for key in response['data']['keys']:
+                            # Parse the key format: {agent_name}_{key_name}
+                            if '_' in key:
+                                parts = key.split('_', 1)
+                                if len(parts) == 2:
+                                    agent_scope, key_name = parts
+                                    
+                                    # Determine if it's common, default, or specific agent
+                                    is_common = agent_scope == "common"
+                                    agent_id = None if agent_scope in ["common", "default"] else agent_scope
+                                    
+                                    # Generate key_id for consistency
+                                    key_id = f"{user.id}_{key_name}_{agent_scope}"
+                                    
+                                    connections.append(AgentConnectionResponse(
+                                        key_id=key_id,
+                                        key_name=key_name,
+                                        agent_id=agent_id,
+                                        is_common=is_common,
+                                        created_at=datetime.now()  # We don't have actual creation time from Vault
+                                    ))
+                                    
+                except Exception as e:
+                    # If listing fails (e.g., path doesn't exist), just return empty list
+                    logger.debug(f"No agent connections found for user {user.id}: {str(e)}")
+        
+        logger.info(f"Listed {len(connections)} agent connections for user {user.id}")
         
         return connections
         
@@ -160,7 +205,7 @@ async def get_agent_connection(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.put("/{key_id}", response_model=dict)
+@router.put("/{key_id}", response_model=AgentConnectionResponse)
 async def update_agent_connection(
     key_id: str,
     connection: AgentConnectionUpdate,
@@ -238,10 +283,13 @@ async def update_agent_connection(
         
         logger.info(f"Updated key {current_key_name} -> {new_key_name} for user {user_id_from_key}")
         
-        return {
-            "status": "success",
-            "key_id": new_key_id
-        }
+        return AgentConnectionResponse(
+            key_id=new_key_id,
+            key_name=new_key_name,
+            agent_id=new_agent_id,
+            is_common=new_is_common,
+            created_at=datetime.now()
+        )
         
     except HTTPException:
         raise
