@@ -29,8 +29,8 @@ let showDeleteConfirmDialog = false;
 
 // Initialize form values when connection changes (only once per connection)
 $: if (mode === 'edit' && connection && !initialized) {
-  name = connection.name;
-  value = connection.value;
+  name = connection.key_name;
+  value = ''; // Don't pre-fill sensitive values for security
   agent_id = connection.agent_id || '';
   is_common = connection.is_common || false;
   initialized = true;
@@ -80,12 +80,12 @@ async function handleSubmit(e: Event) {
   
   saving = true;
   try {
-    const conn: AgentConnection = {
-      name,
-      value,
+    const conn = {
+      key_name: name,
+      key_value: value,
       agent_id: agent_id || null,
       is_common
-    } as AgentConnection;
+    };
     dispatch('save', { connection: conn });
     close();
   } finally {

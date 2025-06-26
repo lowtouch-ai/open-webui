@@ -18,9 +18,12 @@
 	import ConnectionModal from './AgentConnections/ConnectionModal.svelte';
 
 	import {
-		getAgentConnectionsConfig,
-		setAgentConnectionsConfig,
-		type AgentConnection
+		listAgentConnections,
+		createAgentConnection,
+		updateAgentConnection,
+		deleteAgentConnection,
+		type AgentConnection,
+		type AgentConnectionCreate
 	} from '$lib/apis/agent-connections';
 
 	export let onSave = () => {};
@@ -32,7 +35,7 @@
 	let showAddModal = false;
 	let editConnection: AgentConnection | null = null;
 	let showDeleteConfirmDialog = false;
-	let deleteTargetIndex = -1;
+	let deleteTargetKeyId = '';
 
 // Search & pagination
 let searchTerm = '';
@@ -43,9 +46,8 @@ $: filteredConnections = agentConnections.filter((c) => {
 	const term = searchTerm.trim().toLowerCase();
 	if (!term) return true;
 	return (
-		c.name.toLowerCase().includes(term) ||
-		(c.agent_id || '').toLowerCase().includes(term) ||
-		(c.value || '').toLowerCase().includes(term)
+		c.key_name.toLowerCase().includes(term) ||
+		(c.agent_id || '').toLowerCase().includes(term)
 	);
 });
 
@@ -61,90 +63,88 @@ function goToPage(p: number) {
 	currentPage = Math.min(Math.max(1, p), totalPages);
 }
 
-	// Variables for add modal
-	let name = '';
-	let value = '';
-	let agent_id = '';
-	let is_common = false;
-
-	// Variables for edit modal
-	$: editName = editConnection?.name || '';
-	$: editValue = editConnection?.value || '';
-	$: editAgentId = editConnection?.agent_id || '';
-	$: editIsCommon = editConnection?.is_common || false;
-
-	const fetchConfig = async () => {
+	const fetchConnections = async () => {
 		loading = true;
 
 		try {
-			const response = await getAgentConnectionsConfig($userStore.token);
-			agentConnections = response.AGENT_CONNECTIONS || [];
+			agentConnections = await listAgentConnections($userStore.token);
 		} catch (error) {
-			console.error('Error fetching agent connections config:', error);
-			toast.error($i18n.t('Failed to fetch agent connections config'));
+			console.error('Error fetching agent connections:', error);
+			toast.error($i18n.t('Failed to fetch agent connections'));
 		} finally {
 			loading = false;
 		}
 	};
 
-	const saveConfig = async () => {
+	const addConnection = async (connectionData: AgentConnectionCreate) => {
 		saving = true;
-
 		try {
-			await setAgentConnectionsConfig($userStore.token, {
-				AGENT_CONNECTIONS: agentConnections
-			});
-
-			toast.success($i18n.t('Agent connections config saved successfully'));
+			const response = await createAgentConnection($userStore.token, connectionData);
+			agentConnections = [...agentConnections, response];
+			// Reset search to show the newly added connection
+			searchTerm = '';
+			currentPage = 1;
+			toast.success($i18n.t('Agent connection created successfully'));
 			dispatch('save');
 		} catch (error) {
-			console.error('Error saving agent connections config:', error);
-			toast.error($i18n.t('Failed to save agent connections config'));
+			console.error('Error creating agent connection:', error);
+			toast.error($i18n.t('Failed to create agent connection'));
 		} finally {
 			saving = false;
 		}
 	};
 
-	// Validate connection name (alphanumeric, no spaces)
-	const validateConnectionName = (name: string): boolean => {
-		return /^[a-zA-Z0-9_]+$/.test(name);
+	const updateConnectionById = async (updateData: AgentConnectionUpdate, keyId: string) => {
+		saving = true;
+		try {
+			const response = await updateAgentConnection($userStore.token, keyId, updateData);
+			
+			// Find and update the connection in the array
+			const index = agentConnections.findIndex(c => c.key_id === keyId);
+			if (index !== -1) {
+				agentConnections[index] = response;
+				agentConnections = [...agentConnections];
+			}
+			toast.success($i18n.t('Agent connection updated successfully'));
+			dispatch('save');
+		} catch (error) {
+			console.error('Error updating agent connection:', error);
+			toast.error($i18n.t('Failed to update agent connection'));
+		} finally {
+			saving = false;
+		}
 	};
 
-	const addConnection = (connection: AgentConnection) => {
-		agentConnections = [...agentConnections, connection];
-		// Reset search to show the newly added connection
-		searchTerm = '';
-		currentPage = 1;
-		saveConfig();
+	const deleteConnectionById = async (keyId: string) => {
+		saving = true;
+		try {
+			await deleteAgentConnection($userStore.token, keyId);
+			agentConnections = agentConnections.filter(c => c.key_id !== keyId);
+			toast.success($i18n.t('Agent connection deleted successfully'));
+			dispatch('save');
+		} catch (error) {
+			console.error('Error deleting agent connection:', error);
+			toast.error($i18n.t('Failed to delete agent connection'));
+		} finally {
+			saving = false;
+		}
 	};
 
-	const updateConnection = (connection: AgentConnection, index: number) => {
-		agentConnections[index] = connection;
-		agentConnections = [...agentConnections];
-		saveConfig();
-	};
-
-	const deleteConnection = (index: number) => {
-		agentConnections.splice(index, 1);
-		agentConnections = [...agentConnections];
-		saveConfig();
-	};
-
-	const confirmDelete = (index: number) => {
-		deleteTargetIndex = index;
+	const confirmDelete = (keyId: string) => {
+		deleteTargetKeyId = keyId;
 		showDeleteConfirmDialog = true;
 	};
 
 	const handleDeleteConfirm = () => {
-		if (deleteTargetIndex !== -1) {
-			deleteConnection(deleteTargetIndex);
-			deleteTargetIndex = -1;
+		if (deleteTargetKeyId) {
+			deleteConnectionById(deleteTargetKeyId);
+			deleteTargetKeyId = '';
 		}
 		showDeleteConfirmDialog = false;
 	};
 
 	onMount(() => {
-		fetchConfig();
+		fetchConnections();
 	});
 </script>
 
@@ -221,24 +221,14 @@ function goToPage(p: number) {
 			connections={paginatedConnections}
 			on:edit={(e) => {
 				const { index } = e.detail;
-				editConnection = paginatedConnections[index];
-				// Store the original index for reliable updates
-				editConnection._originalIndex = agentConnections.findIndex(conn => 
-					conn.name === editConnection.name && 
-					conn.value === editConnection.value && 
-					conn.agent_id === editConnection.agent_id
-				);
+				editConnection = { ...paginatedConnections[index] };
 			}}
 			on:delete={(e) => {
 				const { index } = e.detail;
-				// Need original index in agentConnections array
-				const globalIndex = agentConnections.findIndex(conn => {
-					const target = paginatedConnections[index];
-					return conn.name === target.name && 
-						   conn.value === target.value && 
-						   conn.agent_id === target.agent_id;
-				});
-				if (globalIndex !== -1) confirmDelete(globalIndex);
+				const connection = paginatedConnections[index];
+				if (connection.key_id) {
+					confirmDelete(connection.key_id);
+				}
 			}}
 		/>
 
@@ -299,29 +289,15 @@ function goToPage(p: number) {
 		connection={editConnection}
 		on:close={() => (editConnection = null)}
 		on:save={(e) => {
-			// Use the stored original index if available, otherwise fall back to findIndex
-			let idx = editConnection._originalIndex;
-			if (idx === undefined || idx === -1) {
-				idx = agentConnections.findIndex(conn => 
-					conn.name === editConnection.name && 
-					conn.value === editConnection.value && 
-					conn.agent_id === editConnection.agent_id
-				);
+			if (editConnection && editConnection.key_id) {
+				updateConnectionById(e.detail.connection, editConnection.key_id);
 			}
-			if (idx !== -1) updateConnection(e.detail.connection, idx);
 			editConnection = null;
 		}}
 		on:delete={() => {
-			// Use the stored original index if available, otherwise fall back to findIndex  
-			let idx = editConnection._originalIndex;
-			if (idx === undefined || idx === -1) {
-				idx = agentConnections.findIndex(conn => 
-					conn.name === editConnection.name && 
-					conn.value === editConnection.value && 
-					conn.agent_id === editConnection.agent_id
-				);
+			if (editConnection && editConnection.key_id) {
+				confirmDelete(editConnection.key_id);
 			}
-			if (idx !== -1) confirmDelete(idx);
 			editConnection = null;
 		}}
 	/>

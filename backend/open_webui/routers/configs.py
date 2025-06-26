@@ -8,6 +8,10 @@ from open_webui.config import get_config, save_config
 from open_webui.config import BannerModel
 from open_webui.config import ENABLE_VAULT_INTEGRATION, VAULT_URL, VAULT_TOKEN, VAULT_MOUNT_PATH, VAULT_VERSION, VAULT_TIMEOUT, VAULT_VERIFY_SSL
 
+from open_webui.utils.tools import get_tool_server_data, get_tool_servers_data
+from open_webui.utils.vault import test_vault_connection, store_agent_connection_in_vault, get_agent_connection_from_vault, delete_agent_connection_from_vault
+from loguru import logger
+
 
 router = APIRouter()
 
@@ -113,6 +117,7 @@ async def get_agent_connections_config(request: Request, user=Depends(get_verifi
                 # Try to get the value from Vault
                 vault_value = get_agent_connection_from_vault(
                     name=conn.get("name"),
+                    user_id=user.id,
                     is_common=conn.get("is_common", False),
                     agent_id=conn.get("agent_id")
                 )
@@ -152,6 +157,7 @@ async def get_agent_connections_config(request: Request, user=Depends(get_verifi
             # Try to get the value from Vault
             vault_value = get_agent_connection_from_vault(
                 name=conn.get("name"),
+                user_id=user.id,
                 is_common=conn.get("is_common", False),
                 agent_id=conn.get("agent_id")
             )
@@ -181,13 +187,16 @@ async def set_agent_connections_config(
     if ENABLE_VAULT_INTEGRATION.value:
         for connection in connections:
             # Store the secret in Vault
-            success = store_agent_connection_in_vault(connection)
+            success = store_agent_connection_in_vault(connection, user.id)
             
             # If successfully stored in Vault, remove the value from the connection
             # to avoid storing it in the database
             if success:
                 # Keep a placeholder value to indicate it's stored in Vault
                 connection["value"] = "[STORED_IN_VAULT]"
+                logger.info(f"Stored agent connection {connection.get('name')} for user {user.id} in Vault")
+            else:
+                logger.error(f"Failed to store agent connection {connection.get('name')} for user {user.id} in Vault")
     
     # Update the PersistentConfig value (or set directly if it's a list)
     agent_connections = request.app.state.config.AGENT_CONNECTIONS

@@ -11,8 +11,11 @@ Open WebUI supports integration with HashiCorp Vault for secure storage and retr
 - Support for Vault KV secrets engine versions 1 and 2
 - Configuration via environment variables or UI
 - Connection testing functionality
-- Secure storage and retrieval of agent connection secrets
+- Secure storage and retrieval of agent connection secrets with AES encryption
 - Role-based access control for Vault tokens
+- REST API endpoints for managing agent connections
+- Integration with Ollama API via X-LTAI-Vault-Keys header
+- Local Vault setup support for development
 
 ## Prerequisites
 
@@ -35,6 +38,7 @@ You can configure the Vault integration using the following environment variable
 | `VAULT_KV_VERSION` | Version of the KV secrets engine (1 or 2) | `2` |
 | `VAULT_TIMEOUT` | Timeout for Vault operations in seconds | `30` |
 | `VAULT_VERIFY_SSL` | Whether to verify SSL certificates | `true` |
+| `VAULT_ENCRYPTION_KEY` | Custom encryption key for AES encryption (optional) | `""` |
 
 Example in docker-compose.yaml:
 
@@ -67,6 +71,77 @@ Administrators can configure Vault integration through the admin settings UI:
 5. Click "Test Connection" to verify the configuration
 6. Click "Save" to apply the changes
 
+## Local Development Setup
+
+For local development, you can set up Vault using the provided setup script:
+
+```bash
+# Using Docker (recommended)
+./scripts/setup-vault.sh docker
+
+# Using binary installation
+./scripts/setup-vault.sh binary
+```
+
+The script will:
+- Set up Vault with the correct configuration
+- Enable KV v2 secrets engine
+- Create appropriate policies for Open WebUI
+- Generate tokens for secure access
+- Provide environment variables for configuration
+
+## API Endpoints
+
+Open WebUI provides REST API endpoints for managing agent connections:
+
+### Create Connection
+```http
+POST /api/v1/agent_connections/
+Content-Type: application/json
+
+{
+  "key_name": "api_key",
+  "key_value": "secret-value",
+  "agent_id": "agent-123",
+  "is_common": false
+}
+```
+
+### List Connections
+```http
+GET /api/v1/agent_connections/
+```
+
+### Get Connection
+```http
+GET /api/v1/agent_connections/{key_id}
+```
+
+### Update Connection
+```http
+PUT /api/v1/agent_connections/{key_id}
+Content-Type: application/json
+
+{
+  "key_value": "new-secret-value"
+}
+```
+
+### Delete Connection
+```http
+DELETE /api/v1/agent_connections/{key_id}
+```
+
+## Integration with Ollama API
+
+When making requests to Ollama API (for OpenWebUI-Agentomatic communication), Open WebUI automatically includes relevant agent connections in the `X-LTAI-Vault-Keys` header:
+
+```http
+X-LTAI-Vault-Keys: agent1_api_key,COMMON_shared_key,agent2_token
+```
+
+This allows the agent runtime to retrieve and use the appropriate secrets for API calls.
+
 ## Security Best Practices
 
 ### Vault Token
@@ -87,8 +162,18 @@ Administrators can configure Vault integration through the admin settings UI:
 
 Agent connection secrets in Vault follow this naming convention:
 
-- For common connections: `agent_connections/common/{connection_name}`
-- For agent-specific connections: `agent_connections/agent/{agent_id}/{connection_name}`
+- Path structure: `secret/data/users/<user_id>/<agent_name>_<key_name>`
+- For common connections: `secret/data/users/<user_id>/common_<key_name>`
+- For agent-specific connections: `secret/data/users/<user_id>/<agent_id>_<key_name>`
+- For default connections: `secret/data/users/<user_id>/default_<key_name>`
+
+### Encryption
+
+All secret values are encrypted using AES encryption before being stored in Vault:
+
+- Uses Fernet symmetric encryption (AES 128 in CBC mode with HMAC SHA256)
+- Encryption key can be provided via `VAULT_ENCRYPTION_KEY` environment variable
+- If no custom key is provided, a default key is derived using PBKDF2
 
 ## Troubleshooting
 

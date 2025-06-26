@@ -1,18 +1,50 @@
 import { WEBUI_BASE_URL } from '../constants';
 
 export interface AgentConnection {
-	name: string;
-	value: string;
+	key_id: string;
+	key_name: string;
+	agent_id?: string;
+	is_common: boolean;
+	created_at: string;
+}
+
+export interface AgentConnectionCreate {
+	key_name: string;
+	key_value: string;
 	agent_id?: string;
 	is_common: boolean;
 }
 
-export interface AgentConnectionsConfig {
-	AGENT_CONNECTIONS: AgentConnection[];
+export interface AgentConnectionUpdate {
+	key_name?: string;
+	key_value?: string;
+	agent_id?: string;
+	is_common?: boolean;
 }
 
-export const getAgentConnectionsConfig = async (token: string) => {
-	const response = await fetch(`${WEBUI_BASE_URL}/api/v1/configs/agent_connections`, {
+// REST API functions
+export const createAgentConnection = async (
+	token: string,
+	connection: AgentConnectionCreate
+) => {
+	const response = await fetch(`${WEBUI_BASE_URL}/api/v1/agent_connections/`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify(connection)
+	});
+
+	if (!response.ok) {
+		throw new Error(`Failed to create agent connection: ${response.statusText}`);
+	}
+
+	return await response.json();
+};
+
+export const listAgentConnections = async (token: string): Promise<AgentConnection[]> => {
+	const response = await fetch(`${WEBUI_BASE_URL}/api/v1/agent_connections/`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json',
@@ -21,27 +53,60 @@ export const getAgentConnectionsConfig = async (token: string) => {
 	});
 
 	if (!response.ok) {
-		throw new Error(`Failed to get agent connections config: ${response.statusText}`);
+		throw new Error(`Failed to list agent connections: ${response.statusText}`);
 	}
 
 	return await response.json();
 };
 
-export const setAgentConnectionsConfig = async (
+export const getAgentConnection = async (token: string, keyId: string) => {
+	const response = await fetch(`${WEBUI_BASE_URL}/api/v1/agent_connections/${keyId}`, {
+		method: 'GET',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		}
+	});
+
+	if (!response.ok) {
+		throw new Error(`Failed to get agent connection: ${response.statusText}`);
+	}
+
+	return await response.json();
+};
+
+export const updateAgentConnection = async (
 	token: string,
-	config: AgentConnectionsConfig
+	keyId: string,
+	connection: AgentConnectionUpdate
 ) => {
-	const response = await fetch(`${WEBUI_BASE_URL}/api/v1/configs/agent_connections`, {
-		method: 'POST',
+	const response = await fetch(`${WEBUI_BASE_URL}/api/v1/agent_connections/${keyId}`, {
+		method: 'PUT',
 		headers: {
 			'Content-Type': 'application/json',
 			Authorization: `Bearer ${token}`
 		},
-		body: JSON.stringify(config)
+		body: JSON.stringify(connection)
 	});
 
 	if (!response.ok) {
-		throw new Error(`Failed to set agent connections config: ${response.statusText}`);
+		throw new Error(`Failed to update agent connection: ${response.statusText}`);
+	}
+
+	return await response.json();
+};
+
+export const deleteAgentConnection = async (token: string, keyId: string) => {
+	const response = await fetch(`${WEBUI_BASE_URL}/api/v1/agent_connections/${keyId}`, {
+		method: 'DELETE',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		}
+	});
+
+	if (!response.ok) {
+		throw new Error(`Failed to delete agent connection: ${response.statusText}`);
 	}
 
 	return await response.json();
