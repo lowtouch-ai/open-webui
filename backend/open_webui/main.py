@@ -76,6 +76,7 @@ from open_webui.routers import (
     tools,
     users,
     utils,
+    agent_connections,
 )
 
 from open_webui.routers.retrieval import (
@@ -977,6 +978,7 @@ app.include_router(audio.router, prefix="/api/v1/audio", tags=["audio"])
 app.include_router(retrieval.router, prefix="/api/v1/retrieval", tags=["retrieval"])
 
 app.include_router(configs.router, prefix="/api/v1/configs", tags=["configs"])
+app.include_router(agent_connections.router, prefix="/api/v1/agent_connections", tags=["agent_connections"])
 
 app.include_router(auths.router, prefix="/api/v1/auths", tags=["auths"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"])

@@ -35,11 +35,11 @@
       {#each connections as connection, i}
         <tr class="hover:bg-gray-50 dark:hover:bg-gray-900 transition">
           <td class="px-4 py-3 whitespace-nowrap">
-            <div class="font-medium text-gray-900 dark:text-gray-100">{connection.name}</div>
+            <div class="font-medium text-gray-900 dark:text-gray-100">{connection.key_name}</div>
           </td>
           <td class="px-4 py-3">
-            <div class="text-sm text-gray-600 dark:text-gray-400 max-w-xs truncate" title={connection.value}>
-              {connection.value.length > 50 ? connection.value.substring(0, 50) + '...' : connection.value}
+            <div class="text-sm text-gray-600 dark:text-gray-400 max-w-xs truncate">
+              *** (hidden for security)
             </div>
           </td>
           <td class="px-4 py-3 whitespace-nowrap">

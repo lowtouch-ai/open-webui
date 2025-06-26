@@ -31,6 +31,32 @@ services:
     profiles:
       - vault  # Optional service, start with: docker-compose --profile vault up
 
+  vault-init:
+    image: hashicorp/vault:latest
+    container_name: vault-init-dev
+    depends_on:
+      vault:
+        condition: service_healthy
+    environment:
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=dev-root-token
+    command: |
+      sh -c '
+        echo "Waiting for Vault to be ready..."
+        sleep 5
+        echo "Enabling KV v2 secrets engine..."
+        if ! vault secrets list | grep -q "secret/"; then
+          vault secrets enable -path=secret kv-v2
+          echo "✓ KV v2 secrets engine enabled at secret/"
+        else
+          echo "✓ KV secrets engine already enabled"
+        fi
+        echo "Vault configuration complete!"
+      '
+    profiles:
+      - vault
+    restart: "no"
+
   open-webui-backend:
     build:
       context: ./backend

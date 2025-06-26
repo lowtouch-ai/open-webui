@@ -1,6 +1,4 @@
-import { get } from 'svelte/store';
-import { user } from '$lib/stores';
-import { getAgentConnectionsConfig, type AgentConnection } from '$lib/apis/agent-connections';
+import { listAgentConnections, type AgentConnection } from '$lib/apis/agent-connections';
 
 /**
  * Build vault keys header from agent connections
@@ -12,8 +10,7 @@ export async function buildVaultKeysHeader(agentId?: string): Promise<string | n
 		const token = localStorage.token;
 		if (!token) return null;
 
-		const response = await getAgentConnectionsConfig(token);
-		const connections: AgentConnection[] = response.AGENT_CONNECTIONS || [];
+		const connections: AgentConnection[] = await listAgentConnections(token);
 
 		if (connections.length === 0) return null;
 
@@ -36,7 +33,7 @@ export async function buildVaultKeysHeader(agentId?: string): Promise<string | n
 		// Build the header value in format: agentId_key1,COMMON_key2
 		const vaultKeys = relevantConnections.map(conn => {
 			const prefix = conn.is_common ? 'COMMON' : (agentId || 'UNKNOWN');
-			return `${prefix}_${conn.name}`;
+			return `${prefix}_${conn.key_name}`;
 		});
 
 		return vaultKeys.join(',');
@@ -51,15 +48,19 @@ export async function buildVaultKeysHeader(agentId?: string): Promise<string | n
  * @param model - Model object from the store
  * @returns string | null - Agent ID if found
  */
-export function extractAgentIdFromModel(model: any): string | null {
+export function extractAgentIdFromModel(model: Record<string, unknown>): string | null {
 	if (!model) return null;
 
 	// Check model meta for agent_id
-	const agentId = model.info?.meta?.agent_id || 
-					model.meta?.agent_id || 
-					model.agent_id;
+	const info = model.info as Record<string, unknown> | undefined;
+	const meta = model.meta as Record<string, unknown> | undefined;
+	
+	const agentId = 
+		(info?.meta as Record<string, unknown>)?.agent_id || 
+		meta?.agent_id || 
+		model.agent_id;
 
-	if (agentId) return agentId;
+	if (typeof agentId === 'string') return agentId;
 
 	// Fallback: try to extract from model ID if it follows a pattern
 	// e.g., agent:gpt-4 -> agent ID would be "agent"
