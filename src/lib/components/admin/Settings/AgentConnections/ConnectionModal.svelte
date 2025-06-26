@@ -73,7 +73,7 @@ async function handleSubmit(e: Event) {
     toast.error($i18n.t('Name must be alphanumeric with no spaces'));
     return;
   }
-  if (!value) {
+  if (mode === 'add' && !value) {
     toast.error($i18n.t('Value is required'));
     return;
   }
@@ -140,11 +140,13 @@ function confirmDelete() {
                 <SensitiveInput
                   inputClassName="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   bind:value={value}
-                  placeholder={$i18n.t('Enter connection value (API key, token, etc.)')}
-                  required
+                  placeholder={mode === 'edit' ? $i18n.t('Enter new value or leave empty to keep current') : $i18n.t('Enter connection value (API key, token, etc.)')}
+                  required={mode === 'add'}
                 />
               </div>
-              <div class="mt-1 text-xs text-gray-500">{$i18n.t('The secret value for this connection')}</div>
+              <div class="mt-1 text-xs text-gray-500">
+                {mode === 'edit' ? $i18n.t('Leave empty to keep the current value unchanged') : $i18n.t('The secret value for this connection')}
+              </div>
             </div>
             <div class="flex flex-col w-full mb-3">
               <div class="mb-1 text-sm font-medium text-gray-700 dark:text-gray-300">{$i18n.t('Agent ID')} <span class="text-gray-500 font-normal">({$i18n.t('Optional')})</span></div>
