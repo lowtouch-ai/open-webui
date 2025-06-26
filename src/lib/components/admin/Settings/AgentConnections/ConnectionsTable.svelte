@@ -43,20 +43,20 @@
             </div>
           </td>
           <td class="px-4 py-3 whitespace-nowrap">
-            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {connection.is_common ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'}">
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {connection.is_common ? 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300' : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'}">
               {connection.is_common ? 'Common' : connection.agent_id || 'Specific'}
             </span>
           </td>
           <td class="px-4 py-3 whitespace-nowrap text-center">
             <div class="flex justify-center space-x-2">
               <button
-                class="px-3 py-1 text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-200 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition"
+                class="px-3 py-1 text-sm text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 rounded transition"
                 on:click={() => edit(i)}
               >
                 Edit
               </button>
               <button
-                class="px-3 py-1 text-sm text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-200 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition"
+                class="px-3 py-1 text-sm text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 rounded transition"
                 on:click={() => del(i)}
               >
                 Delete
