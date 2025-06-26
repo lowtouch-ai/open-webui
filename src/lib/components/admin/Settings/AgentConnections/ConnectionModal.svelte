@@ -161,10 +161,10 @@ function confirmDelete() {
               </div>
               <div class="mt-1 text-xs text-gray-500">{$i18n.t('Leave empty to make this connection available to all agents')}</div>
             </div>
-            <div class="flex items-center justify-between mb-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-md">
+            <div class="flex items-center justify-between mb-4 p-3 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-md">
               <div class="flex flex-col">
                 <div class="text-sm font-medium text-gray-700 dark:text-gray-300">{$i18n.t('Common Connection')}</div>
-                <div class="text-xs text-gray-500 mt-1">
+                <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
                   {is_common ? $i18n.t('Available to all agents') : $i18n.t('Specific to one agent')}
                 </div>
               </div>
@@ -175,7 +175,7 @@ function confirmDelete() {
             {#if mode === 'edit'}
               <button 
                 type="button" 
-                class="px-4 py-2 text-sm font-medium text-red-600 dark:text-red-400 bg-white dark:bg-gray-800 border border-red-300 dark:border-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition rounded-md" 
+                class="px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-750 hover:text-gray-700 dark:hover:text-gray-200 transition rounded-md" 
                 on:click={handleDelete}
               >
                 {$i18n.t('Delete')}
@@ -184,7 +184,7 @@ function confirmDelete() {
             <button 
               type="submit" 
               disabled={saving}
-              class="px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white dark:bg-blue-500 dark:hover:bg-blue-600 dark:disabled:bg-blue-700 transition rounded-md flex items-center gap-2"
+              class="px-4 py-2 text-sm font-medium bg-black hover:bg-gray-900 disabled:bg-gray-500 disabled:cursor-not-allowed text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 dark:disabled:bg-gray-600 dark:disabled:text-gray-300 transition rounded-lg flex items-center gap-2"
             >
               {#if saving}
                 <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24">
