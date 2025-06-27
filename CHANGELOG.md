@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- 🔐 **Agent Connections with HashiCorp Vault Integration**: Complete implementation of secure agent connection management
+  - **REST API Endpoints**: New `/api/v1/agent_connections/` endpoints for full CRUD operations on agent connections
+  - **AES Encryption**: Fernet symmetric encryption (AES 128 CBC + HMAC SHA256) for all secret values before Vault storage
+  - **User Isolation**: Per-user secret namespacing with path structure `users/<user_id>/<scope>_<key_name>` for enhanced security
+  - **Enhanced Vault Utilities**: Updated vault integration with encryption/decryption and user-specific operations
+  - **Modern UI Components**: Intuitive React components for agent connection management with search, pagination, and modal forms
+  - **Ollama Integration**: Automatic `X-LTAI-Vault-Keys` header injection for seamless agent API calls
+  - **Development Setup**: Automated Vault setup scripts for local development with Docker and binary installation options
+  - **Comprehensive Documentation**: Complete API documentation, integration guides, security best practices, and troubleshooting guides
+  - **Testing Suite**: Unit tests for backend functionality and end-to-end tests for UI components
+  - **Security Features**: Masked values in API responses, user access control, encrypted storage, and role-based permissions
+
+### Changed
+
+- **Vault Integration Architecture**: Updated existing vault functions to support user isolation and new encrypted path structure
+- **Config Router**: Modified to pass user_id to vault functions for proper user-specific access control
+- **Dependencies**: Added cryptography library (v44.0.0) for robust AES encryption support
+
+### Technical Implementation
+
+- **Path Structure**: Organized secret storage using `secret/data/users/<user_id>/<scope>_<key_name>` format
+- **Encryption**: Fernet symmetric encryption with PBKDF2 key derivation (100,000 iterations) and random salt generation
+- **API Design**: RESTful endpoints with proper validation, error handling, and HTTP status codes
+- **UI/UX**: Responsive design with search functionality, pagination, and secure value masking
+- **Integration**: Seamless integration with existing Ollama API workflows through header injection
+
 ## [0.6.5] - 2025-04-14
 
 ### Added
