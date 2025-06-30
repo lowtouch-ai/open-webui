@@ -14,25 +14,56 @@ export async function buildVaultKeysHeader(agentId?: string): Promise<string | n
 
 		if (connections.length === 0) return null;
 
-		// Filter connections based on agent ID
+		// Filter connections based on agent ID with priority system
 		const relevantConnections = connections.filter(conn => {
-			// Include common connections
-			if (conn.is_common) return true;
-			
-			// Include connections for specific agent
-			if (agentId && conn.agent_id === agentId) return true;
-			
-			// Include connections with no agent_id (available to all)
-			if (!conn.agent_id) return true;
+			// If agent ID is provided, prioritize agent-specific connections
+			if (agentId) {
+				// Include connections specifically for this agent
+				if (conn.agent_id === agentId) return true;
+				
+				// Include common connections
+				if (conn.is_common) return true;
+				
+				// Include connections with no agent_id (legacy - available to all)
+				if (!conn.agent_id && !conn.is_common) return true;
+			} else {
+				// No agent ID provided - include common connections and those without agent_id
+				if (conn.is_common || !conn.agent_id) return true;
+			}
 			
 			return false;
 		});
 
 		if (relevantConnections.length === 0) return null;
 
+		// Sort connections to prioritize agent-specific over common
+		const sortedConnections = relevantConnections.sort((a, b) => {
+			// Agent-specific connections first
+			if (agentId && a.agent_id === agentId && b.agent_id !== agentId) return -1;
+			if (agentId && b.agent_id === agentId && a.agent_id !== agentId) return 1;
+			
+			// Common connections next
+			if (a.is_common && !b.is_common) return 1;
+			if (b.is_common && !a.is_common) return -1;
+			
+			// Alphabetical by key name
+			return a.key_name.localeCompare(b.key_name);
+		});
+
 		// Build the header value in format: agentId_key1,COMMON_key2
-		const vaultKeys = relevantConnections.map(conn => {
-			const prefix = conn.is_common ? 'COMMON' : (agentId || 'UNKNOWN');
+		const vaultKeys = sortedConnections.map(conn => {
+			// Use COMMON prefix for common connections
+			if (conn.is_common) {
+				return `COMMON_${conn.key_name}`;
+			}
+			
+			// Use agent ID prefix for agent-specific connections
+			if (conn.agent_id) {
+				return `${conn.agent_id}_${conn.key_name}`;
+			}
+			
+			// Fallback for legacy connections without agent_id
+			const prefix = agentId || 'GENERAL';
 			return `${prefix}_${conn.key_name}`;
 		});
 

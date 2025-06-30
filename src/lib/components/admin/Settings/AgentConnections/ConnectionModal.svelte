@@ -9,6 +9,7 @@ import Switch from '$lib/components/common/Switch.svelte';
 import Tooltip from '$lib/components/common/Tooltip.svelte';
 import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 
+import { models } from '$lib/stores';
 import type { AgentConnection } from '$lib/apis/agent-connections';
 
 const i18n: any = getContext('i18n');
@@ -26,6 +27,37 @@ let is_common = false;
 let initialized = false;
 let saving = false;
 let showDeleteConfirmDialog = false;
+
+// Filter models to get unique agent IDs
+$: availableAgentIds = [
+  ...new Set(
+    $models
+      .map(model => {
+        // Use the same logic as extractAgentIdFromModel
+        const info = model.info as Record<string, unknown> | undefined;
+        const meta = model.meta as Record<string, unknown> | undefined;
+        
+        const agentId = 
+          (info?.meta as Record<string, unknown>)?.agent_id || 
+          meta?.agent_id || 
+          model.agent_id;
+
+        if (typeof agentId === 'string') return agentId;
+
+        // Fallback: try to extract from model ID if it follows a pattern
+        // e.g., agent:gpt-4 -> agent ID would be "agent"
+        if (typeof model.id === 'string' && model.id.includes(':')) {
+          const parts = model.id.split(':');
+          if (parts.length >= 2) {
+            return parts[0];
+          }
+        }
+
+        return null;
+      })
+      .filter(id => id && id.length > 0)
+  )
+].sort();
 
 // Initialize form values when connection changes (only once per connection)
 $: if (mode === 'edit' && connection && !initialized) {
@@ -151,15 +183,17 @@ function confirmDelete() {
             <div class="flex flex-col w-full mb-3">
               <div class="mb-1 text-sm font-medium text-gray-700 dark:text-gray-300">{$i18n.t('Agent ID')} <span class="text-gray-500 font-normal">({$i18n.t('Optional')})</span></div>
               <div class="flex-1">
-                <input 
-                  class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
-                  type="text" 
-                  bind:value={agent_id} 
-                  placeholder={$i18n.t('Enter specific agent ID or leave empty')} 
-                  autocomplete="off" 
-                />
+                <select 
+                  class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
+                  bind:value={agent_id}
+                >
+                  <option value="">{$i18n.t('Select agent or leave empty for all')}</option>
+                  {#each availableAgentIds as agentId}
+                    <option value={agentId} class="bg-white dark:bg-gray-800">{agentId}</option>
+                  {/each}
+                </select>
               </div>
-              <div class="mt-1 text-xs text-gray-500">{$i18n.t('Leave empty to make this connection available to all agents')}</div>
+              <div class="mt-1 text-xs text-gray-500">{$i18n.t('Select a specific agent or leave empty to make this connection available to all agents')}</div>
             </div>
             <div class="flex items-center justify-between mb-4 p-3 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-md">
               <div class="flex flex-col">

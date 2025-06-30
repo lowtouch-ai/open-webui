@@ -23,7 +23,8 @@
 		updateAgentConnection,
 		deleteAgentConnection,
 		type AgentConnection,
-		type AgentConnectionCreate
+		type AgentConnectionCreate,
+		type AgentConnectionUpdate
 	} from '$lib/apis/agent-connections';
 
 	export let onSave = () => {};
