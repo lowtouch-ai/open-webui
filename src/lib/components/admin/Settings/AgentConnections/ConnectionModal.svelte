@@ -28,6 +28,11 @@ let initialized = false;
 let saving = false;
 let showDeleteConfirmDialog = false;
 
+// Reset agent_id when common connection is enabled
+$: if (is_common) {
+  agent_id = '';
+}
+
 // Filter models to get unique agent IDs
 $: availableAgentIds = [
   ...new Set(
@@ -115,7 +120,7 @@ async function handleSubmit(e: Event) {
     const conn = {
       key_name: name,
       key_value: value,
-      agent_id: agent_id || null,
+      agent_id: is_common ? null : (agent_id || null),
       is_common
     };
     dispatch('save', { connection: conn });
@@ -180,30 +185,35 @@ function confirmDelete() {
                 {mode === 'edit' ? $i18n.t('Leave empty to keep the current value unchanged') : $i18n.t('The secret value for this connection')}
               </div>
             </div>
-            <div class="flex flex-col w-full mb-3">
-              <div class="mb-1 text-sm font-medium text-gray-700 dark:text-gray-300">{$i18n.t('Agent ID')} <span class="text-gray-500 font-normal">({$i18n.t('Optional')})</span></div>
-              <div class="flex-1">
-                <select 
-                  class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
-                  bind:value={agent_id}
-                >
-                  <option value="">{$i18n.t('Select agent or leave empty for all')}</option>
-                  {#each availableAgentIds as agentId}
-                    <option value={agentId} class="bg-white dark:bg-gray-800">{agentId}</option>
-                  {/each}
-                </select>
-              </div>
-              <div class="mt-1 text-xs text-gray-500">{$i18n.t('Select a specific agent or leave empty to make this connection available to all agents')}</div>
-            </div>
+
             <div class="flex items-center justify-between mb-4 p-3 bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-md">
               <div class="flex flex-col">
                 <div class="text-sm font-medium text-gray-700 dark:text-gray-300">{$i18n.t('Common Connection')}</div>
                 <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  {is_common ? $i18n.t('Available to all agents') : $i18n.t('Specific to one agent')}
+                  {is_common ? $i18n.t('This connection will be available to all agents') : $i18n.t('This connection can be assigned to a specific agent')}
                 </div>
               </div>
               <Switch bind:state={is_common} />
             </div>
+
+            {#if !is_common}
+              <div class="flex flex-col w-full mb-3">
+                <div class="mb-1 text-sm font-medium text-gray-700 dark:text-gray-300">{$i18n.t('Agent ID')} <span class="text-gray-500 font-normal">({$i18n.t('Optional')})</span></div>
+                <div class="flex-1">
+                  <select 
+                    class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
+                    bind:value={agent_id}
+                  >
+                    <option value="">{$i18n.t('Select agent or leave empty for all')}</option>
+                    {#each availableAgentIds as agentId}
+                      <option value={agentId} class="bg-white dark:bg-gray-800">{agentId}</option>
+                    {/each}
+                  </select>
+                </div>
+                <div class="mt-1 text-xs text-gray-500">{$i18n.t('Select a specific agent or leave empty to make this connection available to all agents')}</div>
+              </div>
+            {/if}
+
           </div>
           <div class="flex justify-end pt-4 text-sm font-medium gap-3 border-t border-gray-200 dark:border-gray-700 mt-6">
             {#if mode === 'edit'}
