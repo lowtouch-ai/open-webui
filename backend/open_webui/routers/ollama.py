@@ -62,6 +62,7 @@ from open_webui.env import (
     AIOHTTP_CLIENT_TIMEOUT,
     AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST,
     BYPASS_MODEL_ACCESS_CONTROL,
+    ENABLE_FORWARD_USER_INFO_HEADERS,
 )
 from open_webui.constants import ERROR_MESSAGES
 
@@ -75,6 +76,28 @@ log.setLevel(SRC_LOG_LEVELS["OLLAMA"])
 #
 ##########################################
 
+# ENABLE_FORWARD_USER_INFO_HEADERS=True
+
+
+async def send_get_request(url, key=None, user=None):
+    timeout = aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT_OPENAI_MODEL_LIST)
+    headers = {**({"Authorization": f"Bearer {key}"} if key else {})}
+    # Conditionally add user info
+
+    log.info(f"user : {user} and enable {ENABLE_FORWARD_USER_INFO_HEADERS} ")
+    if user and ENABLE_FORWARD_USER_INFO_HEADERS:
+
+        log.info(f"user : {user} and enable {ENABLE_FORWARD_USER_INFO_HEADERS} ")
+        headers.update(
+            {
+                "X-OpenWebUI-User-Name": user.name,
+                "X-OpenWebUI-User-Id": user.id,
+                "X-OpenWebUI-User-Email": user.email,
+                "X-OpenWebUI-User-Role": user.role,
+            }
+        )
+
+        log.info(f"User info: Name :{user.name},Role : {user.role}")
 
 async def send_get_request(url, key=None, user: UserModel = None):
     timeout = aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST)
@@ -129,6 +152,23 @@ async def send_post_request(
         session = aiohttp.ClientSession(
             trust_env=True, timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT)
         )
+        # Build the headers dict
+        headers = {
+            "Content-Type": "application/json",
+            **({"Authorization": f"Bearer {key}"} if key else {}),
+        }
+
+        # Conditionally add user info
+        if user and ENABLE_FORWARD_USER_INFO_HEADERS:
+            headers.update(
+                {
+                    "X-OpenWebUI-User-Name": user.name,
+                    "X-OpenWebUI-User-Id": user.id,
+                    "X-OpenWebUI-User-Email": user.email,
+                    "X-OpenWebUI-User-Role": user.role,
+                }
+            )
+            log.info(f"User info: Name :{user.name},Role : {user.role}")
 
         r = await session.post(
             url,
@@ -455,6 +495,19 @@ async def get_ollama_tags(
 
         r = None
         try:
+            headers = {**({"Authorization": f"Bearer {key}"} if key else {})}
+
+            if user and ENABLE_FORWARD_USER_INFO_HEADERS:
+                headers.update(
+                    {
+                        "X-OpenWebUI-User-Name": user.name,
+                        "X-OpenWebUI-User-Id": user.id,
+                        "X-OpenWebUI-User-Email": user.email,
+                        "X-OpenWebUI-User-Role": user.role,
+                    }
+                )
+                log.info(f"User info: Name :{user.name},Role : {user.role}")
+
             r = requests.request(
                 method="GET",
                 url=f"{url}/api/tags",
@@ -800,6 +853,7 @@ async def copy_model(
     url_idx: Optional[int] = None,
     user=Depends(get_admin_user),
 ):
+
     if url_idx is None:
         await get_all_models(request, user=user)
         models = request.app.state.OLLAMA_MODELS
@@ -816,6 +870,20 @@ async def copy_model(
     key = get_api_key(url_idx, url, request.app.state.config.OLLAMA_API_CONFIGS)
 
     try:
+        headers = {**({"Authorization": f"Bearer {key}"} if key else {})}
+
+        if user and ENABLE_FORWARD_USER_INFO_HEADERS:
+            headers.update(
+                {
+                    "X-OpenWebUI-User-Name": user.name,
+                    "X-OpenWebUI-User-Id": user.id,
+                    "X-OpenWebUI-User-Email": user.email,
+                    "X-OpenWebUI-User-Role": user.role,
+                }
+            )
+
+            log.info(f"User info: Name :{user.name},Role : {user.role}")
+
         r = requests.request(
             method="POST",
             url=f"{url}/api/copy",
@@ -881,6 +949,20 @@ async def delete_model(
     key = get_api_key(url_idx, url, request.app.state.config.OLLAMA_API_CONFIGS)
 
     try:
+        headers = {**({"Authorization": f"Bearer {key}"} if key else {})}
+
+        if user and ENABLE_FORWARD_USER_INFO_HEADERS:
+            headers.update(
+                {
+                    "X-OpenWebUI-User-Name": user.name,
+                    "X-OpenWebUI-User-Id": user.id,
+                    "X-OpenWebUI-User-Email": user.email,
+                    "X-OpenWebUI-User-Role": user.role,
+                }
+            )
+
+            log.info(f"User info: Name :{user.name},Role : {user.role}")
+
         r = requests.request(
             method="DELETE",
             url=f"{url}/api/delete",
@@ -941,6 +1023,20 @@ async def show_model_info(
     key = get_api_key(url_idx, url, request.app.state.config.OLLAMA_API_CONFIGS)
 
     try:
+        headers = {**({"Authorization": f"Bearer {key}"} if key else {})}
+
+        if user and ENABLE_FORWARD_USER_INFO_HEADERS:
+            headers.update(
+                {
+                    "X-OpenWebUI-User-Name": user.name,
+                    "X-OpenWebUI-User-Id": user.id,
+                    "X-OpenWebUI-User-Email": user.email,
+                    "X-OpenWebUI-User-Role": user.role,
+                }
+            )
+
+            log.info(f"User info: Name :{user.name},Role : {user.role}")
+
         r = requests.request(
             method="POST",
             url=f"{url}/api/show",
@@ -1028,6 +1124,20 @@ async def embed(
         form_data.model = form_data.model.replace(f"{prefix_id}.", "")
 
     try:
+        headers = {**({"Authorization": f"Bearer {key}"} if key else {})}
+
+        if user and ENABLE_FORWARD_USER_INFO_HEADERS:
+            headers.update(
+                {
+                    "X-OpenWebUI-User-Name": user.name,
+                    "X-OpenWebUI-User-Id": user.id,
+                    "X-OpenWebUI-User-Email": user.email,
+                    "X-OpenWebUI-User-Role": user.role,
+                }
+            )
+
+            log.info(f"User info: Name :{user.name},Role : {user.role}")
+
         r = requests.request(
             method="POST",
             url=f"{url}/api/embed",
@@ -1115,6 +1225,20 @@ async def embeddings(
         form_data.model = form_data.model.replace(f"{prefix_id}.", "")
 
     try:
+        headers = {**({"Authorization": f"Bearer {key}"} if key else {})}
+
+        if user and ENABLE_FORWARD_USER_INFO_HEADERS:
+            headers.update(
+                {
+                    "X-OpenWebUI-User-Name": user.name,
+                    "X-OpenWebUI-User-Id": user.id,
+                    "X-OpenWebUI-User-Email": user.email,
+                    "X-OpenWebUI-User-Role": user.role,
+                }
+            )
+
+            log.info(f"User info: Name :{user.name},Role : {user.role}")
+
         r = requests.request(
             method="POST",
             url=f"{url}/api/embeddings",
@@ -1205,7 +1329,6 @@ async def generate_completion(
     prefix_id = api_config.get("prefix_id", None)
     if prefix_id:
         form_data.model = form_data.model.replace(f"{prefix_id}.", "")
-
     return await send_post_request(
         url=f"{url}/api/generate",
         payload=form_data.model_dump_json(exclude_none=True).encode(),
@@ -1765,7 +1888,7 @@ async def upload_model(
                 response = requests.post(url, data=f)
 
             if response.ok:
-                log.info(f"Uploaded to /api/blobs")  # DEBUG
+                log.info("Uploaded to /api/blobs")  # DEBUG
                 # Remove local file
                 os.remove(file_path)
 
@@ -1789,7 +1912,7 @@ async def upload_model(
                 )
 
                 if create_resp.ok:
-                    log.info(f"API SUCCESS!")  # DEBUG
+                    log.info("API SUCCESS!")  # DEBUG
                     done_msg = {
                         "done": True,
                         "blob": f"sha256:{file_hash}",
