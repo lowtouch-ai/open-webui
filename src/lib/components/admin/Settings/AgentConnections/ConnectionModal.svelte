@@ -9,7 +9,7 @@ import Switch from '$lib/components/common/Switch.svelte';
 import Tooltip from '$lib/components/common/Tooltip.svelte';
 import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 
-import { models } from '$lib/stores';
+import { models, user } from '$lib/stores';
 import type { AgentConnection } from '$lib/apis/agent-connections';
 
 const i18n: any = getContext('i18n');
@@ -114,6 +114,10 @@ async function handleSubmit(e: Event) {
     toast.error($i18n.t('Value is required'));
     return;
   }
+  if (is_common && $user?.role !== 'admin') {
+    toast.error($i18n.t('Only administrators can create common connections'));
+    return;
+  }
   
   saving = true;
   try {
@@ -191,9 +195,22 @@ function confirmDelete() {
                 <div class="text-sm font-medium text-gray-700 dark:text-gray-300">{$i18n.t('Common Connection')}</div>
                 <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
                   {is_common ? $i18n.t('This connection will be available to all agents') : $i18n.t('This connection can be assigned to a specific agent')}
+                  {#if $user?.role !== 'admin'}
+                    <div class="text-xs text-orange-600 dark:text-orange-400 mt-1">
+                      {$i18n.t('Only administrators can create common connections')}
+                    </div>
+                  {/if}
                 </div>
               </div>
-              <Switch bind:state={is_common} />
+              <div class="flex items-center">
+                {#if $user?.role !== 'admin'}
+                  <Tooltip content={$i18n.t('Only administrators can create common connections')}>
+                    <Switch bind:state={is_common} disabled={true} data-cy="connection-is-common" />
+                  </Tooltip>
+                {:else}
+                  <Switch bind:state={is_common} data-cy="connection-is-common" />
+                {/if}
+              </div>
             </div>
 
             {#if !is_common}

@@ -54,6 +54,10 @@ async def create_agent_connection(
         if not connection.key_name.replace('_', '').isalnum():
             raise HTTPException(status_code=400, detail="Key name must be alphanumeric with underscores only")
         
+        # Check if user is admin when creating common connections
+        if connection.is_common and user.role != "admin":
+            raise HTTPException(status_code=403, detail="Only administrators can create common connections")
+        
         # Prepare connection data for vault
         vault_connection = {
             "name": connection.key_name,
@@ -251,6 +255,10 @@ async def update_agent_connection(
         # Validate new key name if changed
         if new_key_name != current_key_name and not new_key_name.replace('_', '').isalnum():
             raise HTTPException(status_code=400, detail="Key name must be alphanumeric with underscores only")
+        
+        # Check if user is admin when trying to make a connection common
+        if new_is_common and not is_common and user.role != "admin":
+            raise HTTPException(status_code=403, detail="Only administrators can create common connections")
         
         # If key name or scope changed, delete old key first
         if (new_key_name != current_key_name or 
