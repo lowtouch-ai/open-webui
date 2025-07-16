@@ -14,7 +14,7 @@ The system uses a modern REST API architecture with AES encryption, user isolati
 - **User Isolation**: Per-user secret namespacing with path structure `users/<user_id>/<scope>_<key_name>`
 - **REST API**: Complete CRUD operations for agent connections
 - **Modern UI**: Intuitive interface with search, pagination, and connection management
-- **Vault Integration**: Support for KV secrets engine versions 1 and 2
+- **Vault Integration**: Support for KV secrets engine version 1 only (KV v2 is not supported)
 - **Agent Integration**: Automatic header injection for Ollama API calls via `X-LTAI-Vault-Keys`
 - **Local Development**: Automated setup scripts for development environments
 - **Access Control**: Role-based permissions and secure token management
@@ -55,7 +55,7 @@ All secret values are encrypted using **Fernet symmetric encryption** before sto
 ## Prerequisites
 
 - HashiCorp Vault server (version 1.0.0 or higher)
-- Vault KV secrets engine enabled (v1 or v2)
+- Vault KV secrets engine enabled (v1)
 - Vault token with appropriate permissions
 - Python cryptography library (automatically installed)
 
@@ -68,12 +68,11 @@ Configure Vault integration using these environment variables:
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
 | `ENABLE_VAULT_INTEGRATION` | Enable/disable Vault integration | `false` | Yes |
-| `VAULT_URL` | URL of the Vault server | `https://localhost:8200` | Yes |
-| `VAULT_TOKEN` | Vault authentication token | `""` | Yes |
-| `VAULT_MOUNT_PATH` | Mount path of KV secrets engine | `secret` | No |
-| `VAULT_KV_VERSION` | KV secrets engine version (1 or 2) | `2` | No |
-| `VAULT_TIMEOUT` | Timeout for Vault operations (seconds) | `30` | No |
-| `VAULT_VERIFY_SSL` | Verify SSL certificates | `true` | No |
+| `VAULT_URL` | Vault server URL | `http://localhost:8200` | No |
+| `VAULT_TOKEN` | Vault authentication token | | No |
+| `VAULT_MOUNT_PATH` | Mount path for the KV secrets engine | `secret` | No |
+| `VAULT_TIMEOUT` | Request timeout in seconds | `30` | No |
+| `VAULT_VERIFY_SSL` | Whether to verify SSL certificates | `true` | No |
 | `VAULT_ENCRYPTION_KEY` | Custom AES encryption key | `""` | No |
 
 ### Docker Compose Example
@@ -87,7 +86,6 @@ services:
       - VAULT_URL=https://vault.example.com:8200
       - VAULT_TOKEN=hvs.your-vault-token
       - VAULT_MOUNT_PATH=secret
-      - VAULT_KV_VERSION=2
       - VAULT_TIMEOUT=30
       - VAULT_VERIFY_SSL=true
       - VAULT_ENCRYPTION_KEY=your-custom-encryption-key
@@ -151,8 +149,8 @@ vault server -dev -dev-root-token-id="myroot"
 export VAULT_ADDR='http://127.0.0.1:8200'
 export VAULT_TOKEN="myroot"
 
-# Enable KV v2 engine (if not already enabled)
-vault secrets enable -version=2 kv
+# Enable KV v1 engine (if not already enabled)
+vault secrets enable kv
 
 # Create policy for Open WebUI
 vault policy write open-webui-policy - <<EOF

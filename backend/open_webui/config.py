@@ -3173,7 +3173,7 @@ VAULT_MOUNT_PATH = PersistentConfig(
 VAULT_VERSION = PersistentConfig(
     "VAULT_VERSION",
     "vault.version",
-    int(os.environ.get("VAULT_VERSION", "2")),
+    int(os.environ.get("VAULT_VERSION", "1")),
 )
 
 VAULT_TIMEOUT = PersistentConfig(

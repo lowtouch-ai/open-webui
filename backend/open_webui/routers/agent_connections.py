@@ -106,19 +106,10 @@ async def list_agent_connections(user=Depends(get_verified_user)):
                 try:
                     # List all secrets under users/{user_id}/
                     user_path = f"users/{user.id}"
-                    
-                    # Use Vault's list capability for KV v2
-                    if vault_client.kv_version == 2:
-                        response = vault_client.client.secrets.kv.v2.list_secrets(
-                            path=user_path,
-                            mount_point=vault_client.mount_path
-                        )
-                    else:
-                        response = vault_client.client.secrets.kv.v1.list_secrets(
-                            path=user_path,
-                            mount_point=vault_client.mount_path
-                        )
-                    
+                    response = vault_client.client.secrets.kv.v1.list_secrets(
+                        path=user_path,
+                        mount_point=vault_client.mount_path
+                    )
                     if response and 'data' in response and 'keys' in response['data']:
                         for key in response['data']['keys']:
                             # Parse the key format: {agent_name}_{key_name}

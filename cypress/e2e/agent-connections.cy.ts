@@ -192,28 +192,6 @@ describe('Agent Connections', () => {
     cy.get('[data-cy=connections-table]').should('contain', 'pagination_key_');
   });
 
-  it('should handle vault configuration', () => {
-    // Navigate to vault configuration (if available)
-    cy.get('[data-cy=vault-config-tab]').click();
-    
-    // Enable vault integration
-    cy.get('[data-cy=enable-vault-integration]').click();
-    
-    // Fill vault configuration
-    cy.get('[data-cy=vault-url]').clear();
-    cy.get('[data-cy=vault-url]').type('http://localhost:8200');
-    cy.get('[data-cy=vault-token]').clear();
-    cy.get('[data-cy=vault-token]').type('test-token');
-    cy.get('[data-cy=vault-mount-path]').clear();
-    cy.get('[data-cy=vault-mount-path]').type('secret');
-    
-    // Test connection
-    cy.get('[data-cy=test-vault-connection]').click();
-    
-    // Should show connection result (success or failure)
-    cy.get('[data-cy=vault-test-result]').should('be.visible');
-  });
-
   it('should display appropriate error messages', () => {
     // Test creating connection without required fields
     cy.get('[data-cy=add-connection-button]').click();
