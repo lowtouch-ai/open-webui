@@ -14,7 +14,7 @@
 			} else if ($user?.permissions?.workspace?.tools) {
 				goto('/workspace/tools');
 			} else {
-				goto('/workspace/agent-connections');
+				goto('/');
 			}
 		} else {
 			goto('/workspace/models');

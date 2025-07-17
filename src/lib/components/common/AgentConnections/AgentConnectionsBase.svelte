@@ -35,32 +35,19 @@
 	let showDeleteConfirmDialog = false;
 	let deleteTargetKeyId = '';
 
-	// Search & pagination
+	// Simple search (only show for >10 items)
 	let searchTerm = '';
-	const pageSize = 10;
-	let currentPage = 1;
+	const SEARCH_THRESHOLD = 10;
 
-	$: filteredConnections = connections.filter((c) => {
+	$: showSearch = connections.length > SEARCH_THRESHOLD;
+	$: filteredConnections = searchTerm.trim() ? connections.filter((c) => {
 		const term = searchTerm.trim().toLowerCase();
-		if (!term) return true;
 		return (
 			c.key_name.toLowerCase().includes(term) ||
 			(c.agent_id || '').toLowerCase().includes(term) ||
 			(showUserColumn && c.user_name && c.user_name.toLowerCase().includes(term))
 		);
-	});
-
-	$: totalPages = Math.max(1, Math.ceil(filteredConnections.length / pageSize));
-	$: paginatedConnections = filteredConnections.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-
-	// Reset to first page when search results change
-	$: if (searchTerm !== undefined) {
-		currentPage = 1;
-	}
-
-	function goToPage(p: number) {
-		currentPage = Math.min(Math.max(1, p), totalPages);
-	}
+	}) : connections;
 
 	const fetchConnections = async () => {
 		if (customFetchConnections) {
@@ -83,9 +70,7 @@
 		try {
 			const response = await createAgentConnection($userStore.token, connectionData);
 			connections = [...connections, response];
-			// Reset search to show the newly added connection
 			searchTerm = '';
-			currentPage = 1;
 			toast.success($i18n.t('Agent connection created successfully'));
 			dispatch('save');
 		} catch (error) {
@@ -101,7 +86,6 @@
 		try {
 			const response = await updateAgentConnection($userStore.token, keyId, updateData);
 			
-			// Find and update the connection in the array
 			const index = connections.findIndex(c => c.key_id === keyId);
 			if (index !== -1) {
 				connections[index] = response;
@@ -151,27 +135,33 @@
 </script>
 
 <div class="flex flex-col w-full">
-	<div class="flex justify-between items-center mb-4">
-		<div class="text-xl font-bold">{$i18n.t(title)}</div>
-		{#if showAddButton}
-			<button
-				class="px-3 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
-				on:click={() => {
-					showAddModal = true;
-				}}
-			>
-				{$i18n.t('Add Connection')}
-			</button>
-		{/if}
-	</div>
+	{#if title || showAddButton}
+		<div class="flex justify-between items-center mb-4">
+			{#if title}
+				<div class="text-xl font-bold">{$i18n.t(title)}</div>
+			{:else}
+				<div></div>
+			{/if}
+			{#if showAddButton}
+				<button
+					class="px-3 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
+					on:click={() => {
+						showAddModal = true;
+					}}
+				>
+					{$i18n.t('Add Connection')}
+				</button>
+			{/if}
+		</div>
+	{/if}
 
 	{#if loading}
 		<div class="flex justify-center items-center py-8">
 			<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 dark:border-white" />
 		</div>
 	{:else}
-		<!-- Search filter - Always show when there are connections -->
-		{#if connections.length > 0}
+		<!-- Search - Only show for large datasets -->
+		{#if showSearch}
 			<div class="mb-3 flex justify-between items-center">
 				<div class="flex items-center gap-3 w-full">
 					<input
@@ -193,13 +183,11 @@
 		{/if}
 
 		{#if connections.length === 0}
-			<!-- No connections at all -->
 			<div class="flex flex-col items-center justify-center py-8 text-gray-500">
 				<div class="text-lg font-medium mb-2">{$i18n.t('No agent connections')}</div>
 				<div class="text-sm">{$i18n.t('Add a connection to get started')}</div>
 			</div>
-		{:else if filteredConnections.length === 0}
-			<!-- No search results -->
+		{:else if filteredConnections.length === 0 && searchTerm}
 			<div class="flex flex-col items-center justify-center py-8 text-gray-500">
 				<div class="text-lg font-medium mb-2">{$i18n.t('No connections found')}</div>
 				<div class="text-sm mb-3">{$i18n.t('No connections match your search criteria')}</div>
@@ -211,65 +199,35 @@
 				</button>
 			</div>
 		{:else}
-			<!-- Results info -->
-			<div class="mb-2 text-sm text-gray-600 dark:text-gray-400">
-				{#if searchTerm}
+			<!-- Simple results info -->
+			{#if searchTerm}
+				<div class="mb-2 text-sm text-gray-600 dark:text-gray-400">
 					{$i18n.t('Showing {{count}} of {{total}} connections', { count: filteredConnections.length, total: connections.length })}
-				{:else}
-					{$i18n.t('Showing {{count}} connections', { count: connections.length })}
-				{/if}
-			</div>
+				</div>
+			{/if}
 
-			<!-- Table view of connections -->
+			<!-- Simple table view -->
 			<ConnectionsTable
-				connections={paginatedConnections}
+				connections={filteredConnections}
 				{showUserColumn}
 				on:edit={(e) => {
 					const { index } = e.detail;
-					editConnection = { ...paginatedConnections[index] };
+					editConnection = { ...filteredConnections[index] };
 				}}
 				on:delete={(e) => {
 					const { index } = e.detail;
-					const connection = paginatedConnections[index];
+					const connection = filteredConnections[index];
 					if (connection.key_id) {
 						confirmDelete(connection.key_id);
 					}
 				}}
 			/>
-
-			<!-- Pagination controls -->
-			{#if totalPages > 1}
-				<div class="flex justify-center mt-4 space-x-2 text-sm">
-					<button
-						class="px-2 py-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-40"
-						disabled={currentPage === 1}
-						on:click={() => goToPage(currentPage - 1)}
-					>
-						Prev
-					</button>
-					{#each Array(totalPages) as _, i}
-						<button
-							class="px-2 py-1 rounded {currentPage === i + 1 ? 'bg-gray-300 dark:bg-gray-600 font-semibold' : 'hover:bg-gray-200 dark:hover:bg-gray-700'}"
-							on:click={() => goToPage(i + 1)}
-						>
-							{i + 1}
-						</button>
-					{/each}
-					<button
-						class="px-2 py-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-40"
-						disabled={currentPage === totalPages}
-						on:click={() => goToPage(currentPage + 1)}
-					>
-						Next
-					</button>
-				</div>
-			{/if}
 		{/if}
 	{/if}
 </div>
 
-<!-- Add/Edit Modals -->
-{#if showAddModal}
+<!-- Modals -->
+{#if showAddButton && showAddModal}
 	<ConnectionModal
 		bind:show={showAddModal}
 		mode="add"
@@ -277,7 +235,6 @@
 	/>
 {/if}
 
-<!-- Delete Confirmation Dialog -->
 <ConfirmDialog
 	bind:show={showDeleteConfirmDialog}
 	on:confirm={handleDeleteConfirm}
