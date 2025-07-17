@@ -97,6 +97,157 @@ async def create_agent_connection(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@router.get("/debug", response_model=dict)
+async def debug_agent_connections(user=Depends(get_admin_user)):
+    """Debug endpoint to check Vault configuration and connection details."""
+    try:
+        debug_info = {
+            "vault_config_enabled": VAULT_CONFIG.value,
+            "vault_client_available": False,
+            "vault_connection_test": False,
+            "vault_secrets_test": False,
+            "error_details": None,
+            "user_processing": [],
+            "all_users_from_db": [],
+            "final_connections": []
+        }
+        
+        if VAULT_CONFIG.value:
+            vault_client = get_vault_client()
+            if vault_client:
+                debug_info["vault_client_available"] = True
+                
+                try:
+                    # Test connection
+                    connection_result = vault_client.connect()
+                    debug_info["vault_connection_test"] = connection_result
+                    
+                    if connection_result:
+                        # Test listing secrets
+                        try:
+                            response = vault_client.client.secrets.kv.v1.list_secrets(
+                                path="users",
+                                mount_point=vault_client.mount_path
+                            )
+                            debug_info["vault_secrets_test"] = True
+                            debug_info["users_path_response"] = response
+                            
+                            # Get all users from database
+                            try:
+                                all_users_result = Users.get_users()
+                                debug_info["users_result_type"] = str(type(all_users_result))
+                                debug_info["users_result_keys"] = list(all_users_result.keys()) if isinstance(all_users_result, dict) else str(all_users_result)
+                                
+                                # Handle different return types
+                                if hasattr(all_users_result, 'users'):
+                                    # UserListResponse object
+                                    users_list = all_users_result.users
+                                elif isinstance(all_users_result, dict) and 'users' in all_users_result:
+                                    # Dictionary with users key
+                                    users_list = all_users_result['users']
+                                elif isinstance(all_users_result, list):
+                                    # Direct list of users
+                                    users_list = all_users_result
+                                else:
+                                    debug_info["users_parsing_error"] = f"Unexpected users result type: {type(all_users_result)}"
+                                    users_list = []
+                                
+                                all_users = {u.id: u for u in users_list}
+                                debug_info["all_users_from_db"] = [{"id": u.id, "name": u.name, "email": u.email} for u in users_list]
+                                
+                            except Exception as e:
+                                debug_info["users_fetch_error"] = str(e)
+                                all_users = {}
+                                debug_info["all_users_from_db"] = []
+                            
+                            # Process each user found in Vault
+                            if response and 'data' in response and 'keys' in response['data']:
+                                for user_id in response['data']['keys']:
+                                    if user_id.endswith('/'):
+                                        user_id = user_id[:-1]  # Remove trailing slash
+                                    
+                                    user_info = all_users.get(user_id)
+                                    user_debug = {
+                                        "vault_user_id": user_id,
+                                        "user_found_in_db": user_info is not None,
+                                        "user_name": user_info.name if user_info else None,
+                                        "user_email": user_info.email if user_info else None,
+                                        "connections": []
+                                    }
+                                    
+                                    try:
+                                        # List secrets for this user
+                                        user_response = vault_client.client.secrets.kv.v1.list_secrets(
+                                            path=f"users/{user_id}",
+                                            mount_point=vault_client.mount_path
+                                        )
+                                        
+                                        user_debug["user_secrets_response"] = user_response
+                                        
+                                        if user_response and 'data' in user_response and 'keys' in user_response['data']:
+                                            for key in user_response['data']['keys']:
+                                                # Parse the key format: {agent_name}_{key_name}
+                                                if '_' in key:
+                                                    parts = key.split('_', 1)
+                                                    if len(parts) == 2:
+                                                        agent_scope, key_name = parts
+                                                        
+                                                        # Determine if it's common, default, or specific agent
+                                                        is_common = agent_scope == "common"
+                                                        agent_id = None if agent_scope in ["common", "default"] else agent_scope
+                                                        
+                                                        connection_info = {
+                                                            "key": key,
+                                                            "agent_scope": agent_scope,
+                                                            "key_name": key_name,
+                                                            "is_common": is_common,
+                                                            "agent_id": agent_id
+                                                        }
+                                                        
+                                                        user_debug["connections"].append(connection_info)
+                                                        debug_info["final_connections"].append({
+                                                            "key_id": f"{user_id}_{key_name}_{agent_scope}",
+                                                            "key_name": key_name,
+                                                            "agent_id": agent_id,
+                                                            "is_common": is_common,
+                                                            "user_id": user_id,
+                                                            "user_name": user_info.name if user_info else None,
+                                                            "user_email": user_info.email if user_info else None
+                                                        })
+                                                        
+                                    except Exception as e:
+                                        user_debug["user_secrets_error"] = str(e)
+                                    
+                                    debug_info["user_processing"].append(user_debug)
+                            
+                        except Exception as e:
+                            debug_info["vault_secrets_test"] = False
+                            debug_info["secrets_error"] = str(e)
+                            
+                except Exception as e:
+                    debug_info["connection_error"] = str(e)
+            else:
+                debug_info["error_details"] = "Vault client is None"
+        else:
+            debug_info["error_details"] = "Vault integration is disabled in config"
+            
+        return debug_info
+        
+    except Exception as e:
+        logger.error(f"Error in debug endpoint: {str(e)}")
+        return {"error": str(e)}
+
+
+@router.get("/status", response_model=dict)
+async def get_agent_connections_status(user=Depends(get_verified_user)):
+    """Get the status of agent connections integration."""
+    return {
+        "vault_enabled": VAULT_CONFIG.value,
+        "vault_available": False if not VAULT_CONFIG.value else (get_vault_client() is not None and get_vault_client().connect()),
+        "message": "Vault integration is required for agent connections" if not VAULT_CONFIG.value else "Vault integration is available"
+    }
+
+
 @router.get("/", response_model=List[AgentConnectionResponse])
 async def list_agent_connections(user=Depends(get_verified_user)):
     """List keys for a user."""
@@ -169,7 +320,14 @@ async def list_all_agent_connections(user=Depends(get_admin_user)):
                     
                     if response and 'data' in response and 'keys' in response['data']:
                         # Get all user information once
-                        all_users = {user.id: user for user in Users.get_users().items}
+                        all_users_result = Users.get_users()
+                        if hasattr(all_users_result, 'users'):
+                            users_list = all_users_result.users
+                        elif isinstance(all_users_result, dict) and 'users' in all_users_result:
+                            users_list = all_users_result['users']
+                        else:
+                            users_list = []
+                        all_users = {user.id: user for user in users_list}
                         
                         for user_id in response['data']['keys']:
                             if user_id.endswith('/'):
@@ -218,7 +376,12 @@ async def list_all_agent_connections(user=Depends(get_admin_user)):
                 except Exception as e:
                     # If listing fails, just return empty list
                     logger.debug(f"No agent connections found: {str(e)}")
-        
+        else:
+            # Fallback: If Vault is not enabled, check config-based storage
+            logger.info("Vault integration disabled, checking config-based agent connections")
+            # Note: Config-based storage doesn't have user-specific connections
+            # but we can show a message that Vault integration is required for user-specific connections
+            
         logger.info(f"Admin listed {len(connections)} agent connections from all users")
         
         return connections

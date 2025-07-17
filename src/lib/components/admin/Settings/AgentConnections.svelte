@@ -10,6 +10,7 @@
 
 	import {
 		listAllAgentConnections,
+		getAgentConnectionsStatus,
 		type AgentConnection
 	} from '$lib/apis/agent-connections';
 
@@ -17,6 +18,7 @@
 
 	let loading = true;
 	let connections: AgentConnection[] = [];
+	let vaultStatus = null;
 
 	// Summary data
 	$: userSummary = connections.reduce((acc, conn) => {
@@ -48,7 +50,14 @@
 	const fetchConnections = async () => {
 		loading = true;
 		try {
-			connections = await listAllAgentConnections($userStore.token);
+			// First check Vault status
+			vaultStatus = await getAgentConnectionsStatus($userStore.token);
+			console.log('Vault status:', vaultStatus);
+			
+			const result = await listAllAgentConnections($userStore.token);
+			console.log('Agent connections API response:', result);
+			console.log('Number of connections:', result.length);
+			connections = result;
 		} catch (error) {
 			console.error('Error fetching agent connections:', error);
 			toast.error($i18n.t('Failed to fetch agent connections'));
@@ -104,7 +113,38 @@
 					{#if totalConnections === 0}
 						<div class="flex flex-col items-center justify-center py-8 text-gray-500">
 							<div class="text-sm font-medium mb-2">{$i18n.t('No agent connections')}</div>
-							<div class="text-xs">{$i18n.t('Users can create connections through their settings')}</div>
+							{#if vaultStatus}
+								{#if !vaultStatus.vault_enabled}
+									<div class="text-xs text-center">
+										<div class="text-red-600 dark:text-red-400 font-medium mb-1">
+											{$i18n.t('HashiCorp Vault integration is disabled')}
+										</div>
+										<div class="text-gray-500">
+											{$i18n.t('Agent connections require Vault to be configured.')}<br/>
+											{$i18n.t('Set ENABLE_VAULT_INTEGRATION=true to enable this feature.')}
+										</div>
+									</div>
+								{:else if !vaultStatus.vault_available}
+									<div class="text-xs text-center">
+										<div class="text-orange-600 dark:text-orange-400 font-medium mb-1">
+											{$i18n.t('HashiCorp Vault is not available')}
+										</div>
+										<div class="text-gray-500">
+											{$i18n.t('Vault is enabled but connection failed.')}<br/>
+											{$i18n.t('Check Vault server configuration and connectivity.')}
+										</div>
+									</div>
+								{:else}
+									<div class="text-xs text-center">
+										{$i18n.t('Vault is configured and available.')}<br/>
+										{$i18n.t('Users can create connections through their settings.')}
+									</div>
+								{/if}
+							{:else}
+								<div class="text-xs text-center">
+									{$i18n.t('Loading configuration...')}
+								</div>
+							{/if}
 						</div>
 					{:else}
 						<!-- User Summary Table -->
