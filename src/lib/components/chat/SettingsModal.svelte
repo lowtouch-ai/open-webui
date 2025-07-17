@@ -19,6 +19,7 @@
 	import XMark from '../icons/XMark.svelte';
 	import Connections from './Settings/Connections.svelte';
 	import Tools from './Settings/Tools.svelte';
+	import AgentConnections from './Settings/AgentConnections.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -189,6 +190,28 @@
 				'whats new',
 				'websearchinchat',
 				'web search in chat'
+			]
+		},
+		{
+			id: 'agent-connections',
+			title: 'Agent Connections',
+			keywords: [
+				'agent connections',
+				'agentconnections',
+				'api keys',
+				'apikeys',
+				'connections',
+				'keys',
+				'secrets',
+				'tokens',
+				'credentials',
+				'authentication',
+				'personal connections',
+				'personalconnections',
+				'my connections',
+				'myconnections',
+				'manage connections',
+				'manageconnections'
 			]
 		},
 		...($user?.role === 'admin' ||
@@ -651,6 +674,40 @@
 								</div>
 								<div class=" self-center">{$i18n.t('Interface')}</div>
 							</button>
+						{:else if tabId === 'agent-connections'}
+							<button
+								role="tab"
+								aria-controls="tab-agent-connections"
+								aria-selected={selectedTab === 'agent-connections'}
+								class={`px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition
+								${
+									selectedTab === 'agent-connections'
+										? ($settings?.highContrastMode ?? false)
+											? 'dark:bg-gray-800 bg-gray-200'
+											: ''
+										: ($settings?.highContrastMode ?? false)
+											? 'hover:bg-gray-200 dark:hover:bg-gray-800'
+											: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'
+								}`}
+								on:click={() => {
+									selectedTab = 'agent-connections';
+								}}
+							>
+								<div class=" self-center mr-2">
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										aria-hidden="true"
+										viewBox="0 0 16 16"
+										fill="currentColor"
+										class="w-4 h-4"
+									>
+										<path
+											d="M1 9.5A3.5 3.5 0 0 0 4.5 13H12a3 3 0 0 0 .917-5.857 2.503 2.503 0 0 0-3.198-3.019 3.5 3.5 0 0 0-6.628 2.171A3.5 3.5 0 0 0 1 9.5Z"
+										/>
+									</svg>
+								</div>
+								<div class=" self-center">{$i18n.t('Agent Connections')}</div>
+							</button>
 						{:else if tabId === 'connections'}
 							{#if $user?.role === 'admin' || ($user?.role === 'user' && $config?.features?.enable_direct_connections)}
 								<button
@@ -945,6 +1002,13 @@
 					<Interface
 						{saveSettings}
 						on:save={() => {
+							toast.success($i18n.t('Settings saved successfully!'));
+						}}
+					/>
+				{:else if selectedTab === 'agent-connections'}
+					<AgentConnections
+						saveSettings={async (updated) => {
+							await saveSettings(updated);
 							toast.success($i18n.t('Settings saved successfully!'));
 						}}
 					/>
