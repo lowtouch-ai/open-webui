@@ -153,14 +153,12 @@ async def send_post_request(
         session = aiohttp.ClientSession(
             trust_env=True, timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT)
         )
-        log.info(f"Vault api key recieved : {vault_keys}")
         # Build the headers dict
         headers = {
             "Content-Type": "application/json",
             **({"Authorization": f"Bearer {key}"} if key else {}),
             **({"x-ltai-vault-keys": vault_keys} if vault_keys else {}),  # Add vault_keys to headers
         }
-        log.info(f"Headers for request: {headers}")
 
         # Conditionally add user info
         if user and ENABLE_FORWARD_USER_INFO_HEADERS:
@@ -173,7 +171,6 @@ async def send_post_request(
                     **({"x-ltai-vault-keys": vault_keys} if vault_keys else {}),
                 }
             )
-            log.info(f"updated headers: {headers}")
             log.info(f"User info: Name :{user.name},Role : {user.role}")
 
         r = await session.post(
@@ -1388,10 +1385,7 @@ async def generate_chat_completion(
 ):
     if BYPASS_MODEL_ACCESS_CONTROL:
         bypass_filter = True
-    # log the inputed data's for debugging purposes
-    log.info(f"generate_chat_completion  form_data in ollama.py: {form_data}")
-    log.info(f"request from user in ollama.py: {request.headers}")
-    log.info(f"user details in ollama.py: {user}")
+        
     metadata = form_data.pop("metadata", None)
     try:
         form_data = GenerateChatCompletionForm(**form_data)
