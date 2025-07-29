@@ -145,6 +145,7 @@ async def send_post_request(
     key: Optional[str] = None,
     content_type: Optional[str] = None,
     user: UserModel = None,
+    vault_keys: Optional[str] = None,  # Add vault_keys parameter
 ):
 
     r = None
@@ -152,11 +153,14 @@ async def send_post_request(
         session = aiohttp.ClientSession(
             trust_env=True, timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT)
         )
+        log.info(f"Vault api key recieved : {vault_keys}")
         # Build the headers dict
         headers = {
             "Content-Type": "application/json",
             **({"Authorization": f"Bearer {key}"} if key else {}),
+            **({"x-ltai-vault-keys": vault_keys} if vault_keys else {}),  # Add vault_keys to headers
         }
+        log.info(f"Headers for request: {headers}")
 
         # Conditionally add user info
         if user and ENABLE_FORWARD_USER_INFO_HEADERS:
@@ -166,27 +170,16 @@ async def send_post_request(
                     "X-OpenWebUI-User-Id": user.id,
                     "X-OpenWebUI-User-Email": user.email,
                     "X-OpenWebUI-User-Role": user.role,
+                    **({"x-ltai-vault-keys": vault_keys} if vault_keys else {}),
                 }
             )
+            log.info(f"updated headers: {headers}")
             log.info(f"User info: Name :{user.name},Role : {user.role}")
 
         r = await session.post(
             url,
             data=payload,
-            headers={
-                "Content-Type": "application/json",
-                **({"Authorization": f"Bearer {key}"} if key else {}),
-                **(
-                    {
-                        "X-OpenWebUI-User-Name": user.name,
-                        "X-OpenWebUI-User-Id": user.id,
-                        "X-OpenWebUI-User-Email": user.email,
-                        "X-OpenWebUI-User-Role": user.role,
-                    }
-                    if ENABLE_FORWARD_USER_INFO_HEADERS and user
-                    else {}
-                ),
-            },
+            headers=headers,
             ssl=AIOHTTP_CLIENT_SESSION_SSL,
         )
 
@@ -1395,7 +1388,10 @@ async def generate_chat_completion(
 ):
     if BYPASS_MODEL_ACCESS_CONTROL:
         bypass_filter = True
-
+    # log the inputed data's for debugging purposes
+    log.info(f"generate_chat_completion  form_data in ollama.py: {form_data}")
+    log.info(f"request from user in ollama.py: {request.headers}")
+    log.info(f"user details in ollama.py: {user}")
     metadata = form_data.pop("metadata", None)
     try:
         form_data = GenerateChatCompletionForm(**form_data)
@@ -1458,7 +1454,8 @@ async def generate_chat_completion(
     prefix_id = api_config.get("prefix_id", None)
     if prefix_id:
         payload["model"] = payload["model"].replace(f"{prefix_id}.", "")
-
+    # Extract x-ltai-vault-keys from request headers
+    vault_keys = request.headers.get("x-ltai-vault-keys")
     return await send_post_request(
         url=f"{url}/api/chat",
         payload=json.dumps(payload),
@@ -1466,6 +1463,7 @@ async def generate_chat_completion(
         key=get_api_key(url_idx, url, request.app.state.config.OLLAMA_API_CONFIGS),
         content_type="application/x-ndjson",
         user=user,
+        vault_keys=vault_keys,
     )
 
 
@@ -1504,6 +1502,12 @@ async def generate_openai_completion(
     url_idx: Optional[int] = None,
     user=Depends(get_verified_user),
 ):
+    log.info(f"generate_openai_completion {form_data}")
+    log.debug(f"form_data from user: {form_data}")
+    log.info(f"request from user: {request}")
+    log.debug(f"request from user: {request}")
+    log.debug(f"user details: {user}")
+    log.info(f"user details: {user}")
     try:
         form_data = OpenAICompletionForm(**form_data)
     except Exception as e:
