@@ -1496,12 +1496,7 @@ async def generate_openai_completion(
     url_idx: Optional[int] = None,
     user=Depends(get_verified_user),
 ):
-    log.info(f"generate_openai_completion {form_data}")
-    log.debug(f"form_data from user: {form_data}")
-    log.info(f"request from user: {request}")
-    log.debug(f"request from user: {request}")
-    log.debug(f"user details: {user}")
-    log.info(f"user details: {user}")
+    
     try:
         form_data = OpenAICompletionForm(**form_data)
     except Exception as e:
