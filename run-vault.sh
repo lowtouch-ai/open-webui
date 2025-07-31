@@ -1,0 +1,1 @@
+docker compose -f docker-compose.dev.yaml --profile vault up --build

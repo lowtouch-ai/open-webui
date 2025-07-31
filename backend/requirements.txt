@@ -98,7 +98,6 @@ langfuse==2.44.0
 youtube-transcript-api==1.1.0
 pytube==15.0.0
 
-extract_msg
 pydub
 duckduckgo-search==8.0.2
 
@@ -121,6 +120,9 @@ azure-storage-blob==12.24.1
 
 ## LDAP
 ldap3==2.9.1
+
+## Vault
+hvac==2.3.0
 
 ## Firecrawl
 firecrawl-py==1.12.0

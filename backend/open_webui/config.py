@@ -915,6 +915,16 @@ TOOL_SERVER_CONNECTIONS = PersistentConfig(
 )
 
 ####################################
+# AGENT_CONNECTIONS
+####################################
+
+AGENT_CONNECTIONS = PersistentConfig(
+    "AGENT_CONNECTIONS",
+    "agent.connections",
+    [],
+)
+
+####################################
 # WEBUI
 ####################################
 
@@ -3131,4 +3141,49 @@ LDAP_ATTRIBUTE_FOR_GROUPS = PersistentConfig(
     "LDAP_ATTRIBUTE_FOR_GROUPS",
     "ldap.server.attribute_for_groups",
     os.environ.get("LDAP_ATTRIBUTE_FOR_GROUPS", "memberOf"),
+)
+####################################
+# HashiCorp Vault Integration
+####################################
+
+ENABLE_VAULT_INTEGRATION = PersistentConfig(
+    "ENABLE_VAULT_INTEGRATION",
+    "vault.enable",
+    os.environ.get("ENABLE_VAULT_INTEGRATION", "false").lower() == "true",
+)
+
+VAULT_URL = PersistentConfig(
+    "VAULT_URL",
+    "vault.url",
+    os.environ.get("VAULT_URL", "http://localhost:8200"),
+)
+
+VAULT_TOKEN = PersistentConfig(
+    "VAULT_TOKEN",
+    "vault.token",
+    os.environ.get("VAULT_TOKEN", ""),
+)
+
+VAULT_MOUNT_PATH = PersistentConfig(
+    "VAULT_MOUNT_PATH",
+    "vault.mount_path",
+    os.environ.get("VAULT_MOUNT_PATH", "secret"),
+)
+
+VAULT_VERSION = PersistentConfig(
+    "VAULT_VERSION",
+    "vault.version",
+    int(os.environ.get("VAULT_VERSION", "1")),
+)
+
+VAULT_TIMEOUT = PersistentConfig(
+    "VAULT_TIMEOUT",
+    "vault.timeout",
+    int(os.environ.get("VAULT_TIMEOUT", "30")),
+)
+
+VAULT_VERIFY_SSL = PersistentConfig(
+    "VAULT_VERIFY_SSL",
+    "vault.verify_ssl",
+    os.environ.get("VAULT_VERIFY_SSL", "true").lower() == "true",
 )
