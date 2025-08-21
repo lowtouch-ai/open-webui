@@ -40,6 +40,10 @@
 	const textCompletionHandler = async () => {
 		const model = $models.find((model) => model.id === selectedModelId);
 
+		// Extract agent ID from the model
+		const { extractAgentIdFromModel } = await import('$lib/utils/agent-connections');
+		const agentId = extractAgentIdFromModel(model);
+
 		const [res, controller] = await chatCompletion(
 			localStorage.token,
 			{
@@ -52,7 +56,8 @@
 					}
 				]
 			},
-			`${WEBUI_BASE_URL}/api`
+			`${WEBUI_BASE_URL}/api`,
+			agentId
 		);
 
 		if (res && res.ok) {
