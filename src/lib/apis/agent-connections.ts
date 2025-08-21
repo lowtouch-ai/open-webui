@@ -6,6 +6,9 @@ export interface AgentConnection {
 	agent_id?: string;
 	is_common: boolean;
 	created_at: string;
+	user_id?: string;
+	user_name?: string;
+	user_email?: string;
 }
 
 export interface AgentConnectionCreate {
@@ -54,6 +57,22 @@ export const listAgentConnections = async (token: string): Promise<AgentConnecti
 
 	if (!response.ok) {
 		throw new Error(`Failed to list agent connections: ${response.statusText}`);
+	}
+
+	return await response.json();
+};
+
+export const listAllAgentConnections = async (token: string): Promise<AgentConnection[]> => {
+	const response = await fetch(`${WEBUI_BASE_URL}/api/v1/agent_connections/admin/all`, {
+		method: 'GET',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		}
+	});
+
+	if (!response.ok) {
+		throw new Error(`Failed to list all agent connections: ${response.statusText}`);
 	}
 
 	return await response.json();

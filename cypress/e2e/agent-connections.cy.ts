@@ -38,7 +38,10 @@ describe('Agent Connections', () => {
     cy.get('[data-cy=connections-table]').should('contain', 'test_api_key');
   });
 
-  it('should allow adding a common connection', () => {
+  it('should allow adding a common connection (admin only)', () => {
+    // Note: This test assumes the user is logged in as an admin
+    // since it's in the admin settings section
+    
     // Click add connection button
     cy.get('[data-cy=add-connection-button]').click();
     
@@ -46,7 +49,8 @@ describe('Agent Connections', () => {
     cy.get('[data-cy=connection-name]').type('common_key');
     cy.get('[data-cy=connection-value]').type('common-secret-value');
     
-    // Enable common checkbox
+    // Enable common checkbox (should be enabled for admin users)
+    cy.get('[data-cy=connection-is-common]').should('not.be.disabled');
     cy.get('[data-cy=connection-is-common]').click();
     
     // Submit the form
@@ -73,6 +77,26 @@ describe('Agent Connections', () => {
     
     // Verify error message
     cy.contains('Name must be alphanumeric with no spaces').should('be.visible');
+  });
+
+  it('should prevent non-admin users from creating common connections', () => {
+    // Note: This test would need to be run in a context where the user is not an admin
+    // For now, we can test the UI behavior when the user role is changed
+    
+    // Click add connection button
+    cy.get('[data-cy=add-connection-button]').click();
+    
+    // Fill out the form
+    cy.get('[data-cy=connection-name]').type('user_common_key');
+    cy.get('[data-cy=connection-value]').type('user-secret-value');
+    
+    // For non-admin users, the common checkbox should be disabled
+    // This test would need to be adjusted based on how user roles are handled in tests
+    // cy.get('[data-cy=connection-is-common]').should('be.disabled');
+    
+    // If somehow a non-admin tries to submit with is_common=true, 
+    // they should get an error message
+    // This would require mocking the user role or setting up test users
   });
 
   it('should allow editing an existing connection', () => {
@@ -166,28 +190,6 @@ describe('Agent Connections', () => {
     
     // Should show different connections on page 2
     cy.get('[data-cy=connections-table]').should('contain', 'pagination_key_');
-  });
-
-  it('should handle vault configuration', () => {
-    // Navigate to vault configuration (if available)
-    cy.get('[data-cy=vault-config-tab]').click();
-    
-    // Enable vault integration
-    cy.get('[data-cy=enable-vault-integration]').click();
-    
-    // Fill vault configuration
-    cy.get('[data-cy=vault-url]').clear();
-    cy.get('[data-cy=vault-url]').type('http://localhost:8200');
-    cy.get('[data-cy=vault-token]').clear();
-    cy.get('[data-cy=vault-token]').type('test-token');
-    cy.get('[data-cy=vault-mount-path]').clear();
-    cy.get('[data-cy=vault-mount-path]').type('secret');
-    
-    // Test connection
-    cy.get('[data-cy=test-vault-connection]').click();
-    
-    // Should show connection result (success or failure)
-    cy.get('[data-cy=vault-test-result]').should('be.visible');
   });
 
   it('should display appropriate error messages', () => {

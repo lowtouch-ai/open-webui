@@ -25,7 +25,7 @@ A comprehensive setup script for HashiCorp Vault integration with Open WebUI.
 - **Binary Setup**: Downloads and installs Vault binary for native installation
 - **Policy Configuration**: Creates appropriate Vault policies for Open WebUI access
 - **Token Generation**: Generates secure tokens with proper permissions
-- **KV Engine Setup**: Enables and configures KV v2 secrets engine
+- **KV Engine Setup**: Enables and configures KV v1 secrets engine
 - **Development Ready**: Provides all necessary environment variables for local development
 
 ### Docker Setup Details

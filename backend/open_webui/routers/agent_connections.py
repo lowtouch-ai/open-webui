@@ -12,6 +12,7 @@ from open_webui.utils.vault import (
     ENABLE_VAULT_INTEGRATION
 )
 from open_webui.config import ENABLE_VAULT_INTEGRATION as VAULT_CONFIG
+from open_webui.models.users import Users
 from loguru import logger
 
 router = APIRouter()
@@ -30,6 +31,9 @@ class AgentConnectionResponse(BaseModel):
     agent_id: Optional[str] = None
     is_common: bool = False
     created_at: datetime
+    user_id: Optional[str] = None
+    user_name: Optional[str] = None
+    user_email: Optional[str] = None
 
 
 class AgentConnectionUpdate(BaseModel):
@@ -53,6 +57,10 @@ async def create_agent_connection(
         # Validate key name (alphanumeric and underscores only)
         if not connection.key_name.replace('_', '').isalnum():
             raise HTTPException(status_code=400, detail="Key name must be alphanumeric with underscores only")
+        
+        # Check if user is admin when creating common connections
+        if connection.is_common and user.role != "admin":
+            raise HTTPException(status_code=403, detail="Only administrators can create common connections")
         
         # Prepare connection data for vault
         vault_connection = {
@@ -102,19 +110,10 @@ async def list_agent_connections(user=Depends(get_verified_user)):
                 try:
                     # List all secrets under users/{user_id}/
                     user_path = f"users/{user.id}"
-                    
-                    # Use Vault's list capability for KV v2
-                    if vault_client.kv_version == 2:
-                        response = vault_client.client.secrets.kv.v2.list_secrets(
-                            path=user_path,
-                            mount_point=vault_client.mount_path
-                        )
-                    else:
-                        response = vault_client.client.secrets.kv.v1.list_secrets(
-                            path=user_path,
-                            mount_point=vault_client.mount_path
-                        )
-                    
+                    response = vault_client.client.secrets.kv.v1.list_secrets(
+                        path=user_path,
+                        mount_point=vault_client.mount_path
+                    )
                     if response and 'data' in response and 'keys' in response['data']:
                         for key in response['data']['keys']:
                             # Parse the key format: {agent_name}_{key_name}
@@ -148,6 +147,84 @@ async def list_agent_connections(user=Depends(get_verified_user)):
         
     except Exception as e:
         logger.error(f"Error listing agent connections: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/admin/all", response_model=List[AgentConnectionResponse])
+async def list_all_agent_connections(user=Depends(get_admin_user)):
+    """List all agent connections from all users (admin only)."""
+    try:
+        connections = []
+        
+        if VAULT_CONFIG.value:
+            # Get Vault client
+            vault_client = get_vault_client()
+            if vault_client and vault_client.connect():
+                try:
+                    # List all secrets under users/ prefix
+                    response = vault_client.client.secrets.kv.v1.list_secrets(
+                        path="users",
+                        mount_point=vault_client.mount_path
+                    )
+                    
+                    if response and 'data' in response and 'keys' in response['data']:
+                        # Get all user information once
+                        all_users = {user.id: user for user in Users.get_users().items}
+                        
+                        for user_id in response['data']['keys']:
+                            if user_id.endswith('/'):
+                                user_id = user_id[:-1]  # Remove trailing slash
+                            
+                            # Get user info
+                            user_info = all_users.get(user_id)
+                            
+                            try:
+                                # List secrets for this user
+                                user_response = vault_client.client.secrets.kv.v1.list_secrets(
+                                    path=f"users/{user_id}",
+                                    mount_point=vault_client.mount_path
+                                )
+                                
+                                if user_response and 'data' in user_response and 'keys' in user_response['data']:
+                                    for key in user_response['data']['keys']:
+                                        # Parse the key format: {agent_name}_{key_name}
+                                        if '_' in key:
+                                            parts = key.split('_', 1)
+                                            if len(parts) == 2:
+                                                agent_scope, key_name = parts
+                                                
+                                                # Determine if it's common, default, or specific agent
+                                                is_common = agent_scope == "common"
+                                                agent_id = None if agent_scope in ["common", "default"] else agent_scope
+                                                
+                                                # Generate key_id for consistency
+                                                key_id = f"{user_id}_{key_name}_{agent_scope}"
+                                                
+                                                connections.append(AgentConnectionResponse(
+                                                    key_id=key_id,
+                                                    key_name=key_name,
+                                                    agent_id=agent_id,
+                                                    is_common=is_common,
+                                                    created_at=datetime.now(),  # We don't have actual creation time from Vault
+                                                    user_id=user_id,
+                                                    user_name=user_info.name if user_info else None,
+                                                    user_email=user_info.email if user_info else None
+                                                ))
+                                                
+                            except Exception as e:
+                                # If listing fails for a user, just skip them
+                                logger.debug(f"No agent connections found for user {user_id}: {str(e)}")
+                                
+                except Exception as e:
+                    # If listing fails, just return empty list
+                    logger.debug(f"No agent connections found: {str(e)}")
+        
+        logger.info(f"Admin listed {len(connections)} agent connections from all users")
+        
+        return connections
+        
+    except Exception as e:
+        logger.error(f"Error listing all agent connections: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -251,6 +328,10 @@ async def update_agent_connection(
         # Validate new key name if changed
         if new_key_name != current_key_name and not new_key_name.replace('_', '').isalnum():
             raise HTTPException(status_code=400, detail="Key name must be alphanumeric with underscores only")
+        
+        # Check if user is admin when trying to make a connection common
+        if new_is_common and not is_common and user.role != "admin":
+            raise HTTPException(status_code=403, detail="Only administrators can create common connections")
         
         # If key name or scope changed, delete old key first
         if (new_key_name != current_key_name or 

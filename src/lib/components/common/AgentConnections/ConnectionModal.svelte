@@ -272,4 +272,4 @@ function confirmDelete() {
 	<div class="text-sm dark:text-gray-300">
 		{$i18n.t('Are you sure you want to delete this agent connection? This action cannot be undone.')}
 	</div>
-</ConfirmDialog>
+</ConfirmDialog> 

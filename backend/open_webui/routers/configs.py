@@ -8,9 +8,9 @@ from open_webui.config import get_config, save_config
 from open_webui.config import BannerModel
 from open_webui.config import ENABLE_VAULT_INTEGRATION, VAULT_URL, VAULT_TOKEN, VAULT_MOUNT_PATH, VAULT_VERSION, VAULT_TIMEOUT, VAULT_VERIFY_SSL
 
-from open_webui.utils.tools import get_tool_server_data, get_tool_servers_data
-from open_webui.utils.vault import test_vault_connection, store_agent_connection_in_vault, get_agent_connection_from_vault, delete_agent_connection_from_vault
+from open_webui.utils.vault import store_agent_connection_in_vault, get_agent_connection_from_vault, delete_agent_connection_from_vault
 from loguru import logger
+from pydantic import BaseModel, ConfigDict
 
 
 router = APIRouter()
@@ -86,16 +86,6 @@ class AgentConnection(BaseModel):
 
 class AgentConnectionsConfigForm(BaseModel):
     AGENT_CONNECTIONS: List[AgentConnection] = []
-
-
-class VaultConfigForm(BaseModel):
-    ENABLE_VAULT_INTEGRATION: bool
-    VAULT_URL: str
-    VAULT_TOKEN: str
-    VAULT_MOUNT_PATH: str
-    VAULT_VERSION: int
-    VAULT_TIMEOUT: int
-    VAULT_VERIFY_SSL: bool
 
 
 @router.get("/agent_connections", response_model=AgentConnectionsConfigForm)
@@ -211,68 +201,6 @@ async def set_agent_connections_config(
         return {"AGENT_CONNECTIONS": request.app.state.config.AGENT_CONNECTIONS.value}
     else:
         return {"AGENT_CONNECTIONS": request.app.state.config.AGENT_CONNECTIONS}
-
-
-@router.get("/agent_connections/vault_config", response_model=VaultConfigForm)
-async def get_vault_config(request: Request, user=Depends(get_admin_user)):
-    """Get the Vault configuration."""
-    return {
-        "ENABLE_VAULT_INTEGRATION": ENABLE_VAULT_INTEGRATION.value,
-        "VAULT_URL": VAULT_URL.value,
-        "VAULT_TOKEN": VAULT_TOKEN.value,
-        "VAULT_MOUNT_PATH": VAULT_MOUNT_PATH.value,
-        "VAULT_VERSION": VAULT_VERSION.value,
-        "VAULT_TIMEOUT": VAULT_TIMEOUT.value,
-        "VAULT_VERIFY_SSL": VAULT_VERIFY_SSL.value,
-    }
-
-
-@router.post("/agent_connections/vault_config", response_model=VaultConfigForm)
-async def set_vault_config(
-    request: Request,
-    form_data: VaultConfigForm,
-    user=Depends(get_admin_user),
-):
-    """Set the Vault configuration."""
-    ENABLE_VAULT_INTEGRATION.value = form_data.ENABLE_VAULT_INTEGRATION
-    VAULT_URL.value = form_data.VAULT_URL
-    VAULT_TOKEN.value = form_data.VAULT_TOKEN
-    VAULT_MOUNT_PATH.value = form_data.VAULT_MOUNT_PATH
-    VAULT_VERSION.value = form_data.VAULT_VERSION
-    VAULT_TIMEOUT.value = form_data.VAULT_TIMEOUT
-    VAULT_VERIFY_SSL.value = form_data.VAULT_VERIFY_SSL
-    
-    return {
-        "ENABLE_VAULT_INTEGRATION": ENABLE_VAULT_INTEGRATION.value,
-        "VAULT_URL": VAULT_URL.value,
-        "VAULT_TOKEN": VAULT_TOKEN.value,
-        "VAULT_MOUNT_PATH": VAULT_MOUNT_PATH.value,
-        "VAULT_VERSION": VAULT_VERSION.value,
-        "VAULT_TIMEOUT": VAULT_TIMEOUT.value,
-        "VAULT_VERIFY_SSL": VAULT_VERIFY_SSL.value,
-    }
-
-
-@router.post("/agent_connections/test_vault_connection")
-async def test_vault_connection_endpoint(
-    request: Request,
-    form_data: VaultConfigForm,
-    user=Depends(get_admin_user),
-):
-    """Test the connection to Vault."""
-    success, message = test_vault_connection(
-        url=form_data.VAULT_URL,
-        token=form_data.VAULT_TOKEN,
-        mount_path=form_data.VAULT_MOUNT_PATH,
-        kv_version=form_data.VAULT_VERSION,
-        timeout=form_data.VAULT_TIMEOUT,
-        verify_ssl=form_data.VAULT_VERIFY_SSL
-    )
-    
-    if success:
-        return {"status": "success", "message": message}
-    else:
-        raise HTTPException(status_code=400, detail=message)
 
 
 ############################

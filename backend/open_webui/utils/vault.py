@@ -20,7 +20,7 @@ from loguru import logger
 VAULT_URL = os.environ.get("VAULT_URL", "http://localhost:8200")
 VAULT_TOKEN = os.environ.get("VAULT_TOKEN", "")
 VAULT_MOUNT_PATH = os.environ.get("VAULT_MOUNT_PATH", "secret")
-VAULT_VERSION = int(os.environ.get("VAULT_VERSION", "2"))
+VAULT_VERSION = int(os.environ.get("VAULT_VERSION", "1"))
 ENABLE_VAULT_INTEGRATION = os.environ.get("ENABLE_VAULT_INTEGRATION", "false").lower() == "true"
 VAULT_TIMEOUT = int(os.environ.get("VAULT_TIMEOUT", "30"))
 VAULT_VERIFY_SSL = os.environ.get("VAULT_VERIFY_SSL", "true").lower() == "true"
@@ -106,7 +106,7 @@ class VaultClient:
             url: Vault server URL
             token: Vault authentication token
             mount_path: Mount path for the KV secrets engine
-            kv_version: KV secrets engine version (1 or 2)
+            kv_version: KV secrets engine version (1)
             timeout: Request timeout in seconds
             verify_ssl: Whether to verify SSL certificates
         """
@@ -119,8 +119,8 @@ class VaultClient:
         self.client = None
         
         # Validate KV version
-        if self.kv_version not in [1, 2]:
-            raise ValueError("KV version must be 1 or 2")
+        if self.kv_version != 1:
+            raise ValueError("KV version must be 1")
     
     def connect(self) -> bool:
         """Connect to Vault server and verify authentication.
@@ -168,18 +168,11 @@ class VaultClient:
                 return None
         
         try:
-            if self.kv_version == 1:
-                secret = self.client.secrets.kv.v1.read_secret(
-                    path=key,
-                    mount_point=self.mount_path
-                )
-                return secret.get('data')
-            else:  # KV v2
-                secret = self.client.secrets.kv.v2.read_secret_version(
-                    path=key,
-                    mount_point=self.mount_path
-                )
-                return secret.get('data', {}).get('data')
+            secret = self.client.secrets.kv.v1.read_secret(
+                path=key,
+                mount_point=self.mount_path
+            )
+            return secret.get('data')
         except InvalidPath:
             # Secret not found
             return None
@@ -202,18 +195,11 @@ class VaultClient:
                 return False
         
         try:
-            if self.kv_version == 1:
-                self.client.secrets.kv.v1.create_or_update_secret(
-                    path=key,
-                    secret=data,
-                    mount_point=self.mount_path
-                )
-            else:  # KV v2
-                self.client.secrets.kv.v2.create_or_update_secret(
-                    path=key,
-                    secret=data,
-                    mount_point=self.mount_path
-                )
+            self.client.secrets.kv.v1.create_or_update_secret(
+                path=key,
+                secret=data,
+                mount_point=self.mount_path
+            )
             return True
         except VaultError as e:
             logger.error(f"Failed to set secret {key}: {str(e)}")
@@ -233,16 +219,10 @@ class VaultClient:
                 return False
         
         try:
-            if self.kv_version == 1:
-                self.client.secrets.kv.v1.delete_secret(
-                    path=key,
-                    mount_point=self.mount_path
-                )
-            else:  # KV v2
-                self.client.secrets.kv.v2.delete_latest_version_of_secret(
-                    path=key,
-                    mount_point=self.mount_path
-                )
+            self.client.secrets.kv.v1.delete_secret(
+                path=key,
+                mount_point=self.mount_path
+            )
             return True
         except VaultError as e:
             logger.error(f"Failed to delete secret {key}: {str(e)}")
@@ -291,7 +271,7 @@ def test_vault_connection(
         url: Vault server URL
         token: Vault authentication token
         mount_path: Mount path for the KV secrets engine
-        kv_version: KV secrets engine version (1 or 2)
+        kv_version: KV secrets engine version (1)
         timeout: Request timeout in seconds
         verify_ssl: Whether to verify SSL certificates
         

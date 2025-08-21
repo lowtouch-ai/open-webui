@@ -210,7 +210,6 @@ ENABLE_VAULT_INTEGRATION=true
 VAULT_URL=http://localhost:8200
 VAULT_TOKEN=your-vault-token
 VAULT_MOUNT_PATH=secret
-VAULT_KV_VERSION=2
 VAULT_ENCRYPTION_KEY=your-encryption-key
 ```
 

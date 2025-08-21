@@ -44,13 +44,27 @@ services:
       sh -c '
         echo "Waiting for Vault to be ready..."
         sleep 5
-        echo "Enabling KV v2 secrets engine..."
-        if ! vault secrets list | grep -q "secret/"; then
-          vault secrets enable -path=secret kv-v2
-          echo "✓ KV v2 secrets engine enabled at secret/"
+        echo "Setting up KV v1 secrets engine..."
+        
+        # Check if secret engine is already mounted
+        if vault secrets list | grep -q "secret/"; then
+          echo "✓ KV secrets engine already enabled, checking version..."
+          # Get the engine type
+          engine_info=$(vault read sys/mounts/secret -format=json 2>/dev/null || echo "{}")
+          if echo "$engine_info" | grep -q '"type":"kv"'; then
+            echo "✓ KV v1 engine already mounted at secret/"
+          else
+            echo "! Different engine type mounted, disabling and re-enabling as v1..."
+            vault secrets disable secret
+            vault secrets enable -path=secret kv
+            echo "✓ KV v1 secrets engine enabled at secret/"
+          fi
         else
-          echo "✓ KV secrets engine already enabled"
+          echo "Enabling KV v1 secrets engine..."
+          vault secrets enable -path=secret kv
+          echo "✓ KV v1 secrets engine enabled at secret/"
         fi
+        
         echo "Vault configuration complete!"
       '
     profiles:
@@ -82,7 +96,6 @@ services:
       - 'VAULT_URL=http://vault:8200'
       - 'VAULT_TOKEN=dev-root-token'
       - 'VAULT_MOUNT_PATH=secret'
-      - 'VAULT_KV_VERSION=2'
       - 'VAULT_TIMEOUT=30'
       - 'VAULT_VERIFY_SSL=false'
     extra_hosts:
