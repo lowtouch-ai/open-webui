@@ -6,14 +6,11 @@ secrets in HashiCorp Vault instead of the local database.
 """
 
 import os
-import base64
+import re
 from typing import Dict, Any, Optional, List, Tuple
 
 import hvac
 from hvac.exceptions import VaultError, InvalidPath
-from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from loguru import logger
 
 # Environment variable configuration
@@ -24,68 +21,28 @@ VAULT_VERSION = int(os.environ.get("VAULT_VERSION", "1"))
 ENABLE_VAULT_INTEGRATION = os.environ.get("ENABLE_VAULT_INTEGRATION", "false").lower() == "true"
 VAULT_TIMEOUT = int(os.environ.get("VAULT_TIMEOUT", "30"))
 VAULT_VERIFY_SSL = os.environ.get("VAULT_VERIFY_SSL", "true").lower() == "true"
-VAULT_ENCRYPTION_KEY = os.environ.get("VAULT_ENCRYPTION_KEY", "")
+# NOTE: Values are stored in Vault as-is; no additional application-level encryption.
 
 
-def _get_encryption_key() -> bytes:
-    """Get or generate encryption key for AES encryption.
-    
-    Returns:
-        bytes: Encryption key
-    """
-    if VAULT_ENCRYPTION_KEY:
-        # Use provided key
-        key = VAULT_ENCRYPTION_KEY.encode()
-    else:
-        # Generate a key from a default password (in production, this should be configurable)
-        password = b"open-webui-vault-encryption-key"
-        salt = b"open-webui-salt"  # In production, this should be random and stored securely
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=salt,
-            iterations=100000,
-        )
-        key = base64.urlsafe_b64encode(kdf.derive(password))
-    
-    return key
+def sanitize_agent_name(agent_identifier: Optional[str]) -> str:
+    """Sanitize an agent/model identifier into a Vault-safe agent name.
 
+    - Extract substring before the first colon ':' if present.
+    - Replace all non-alphanumeric characters with underscores.
 
-def _encrypt_value(value: str) -> str:
-    """Encrypt a value using AES.
-    
     Args:
-        value: Value to encrypt
-        
-    Returns:
-        str: Base64 encoded encrypted value
-    """
-    try:
-        fernet = Fernet(_get_encryption_key())
-        encrypted_value = fernet.encrypt(value.encode())
-        return base64.b64encode(encrypted_value).decode()
-    except Exception as e:
-        logger.error(f"Failed to encrypt value: {str(e)}")
-        raise
+        agent_identifier: The agent/model identifier string.
 
-
-def _decrypt_value(encrypted_value: str) -> str:
-    """Decrypt a value using AES.
-    
-    Args:
-        encrypted_value: Base64 encoded encrypted value
-        
     Returns:
-        str: Decrypted value
+        str: Sanitized agent name.
     """
-    try:
-        fernet = Fernet(_get_encryption_key())
-        encrypted_bytes = base64.b64decode(encrypted_value.encode())
-        decrypted_value = fernet.decrypt(encrypted_bytes)
-        return decrypted_value.decode()
-    except Exception as e:
-        logger.error(f"Failed to decrypt value: {str(e)}")
-        raise
+    if not agent_identifier:
+        return "default"
+    # Take part before ':' if exists
+    head = agent_identifier.split(":", 1)[0]
+    # Replace non-alphanumeric characters with underscores
+    sanitized = re.sub(r"[^A-Za-z0-9]", "_", head)
+    return sanitized if sanitized else "default"
 
 
 class VaultClient:
@@ -297,60 +254,64 @@ def test_vault_connection(
 
 
 def format_secret_key(name: str, user_id: str, agent_id: Optional[str] = None, is_common: bool = False) -> str:
-    """Format a secret key for Vault using the path structure: users/<user_id>/<agent_name>_<key_name>
-    
+    """Format the base Vault secret path: users/<user_id>/<agent_name>.
+
+    Note: The parameter "name" is ignored in the path in the new scheme. The actual
+    key (field) is stored inside the secret data at this path, not in the path name.
+
     Args:
-        name: Secret name (key_name)
-        user_id: User ID
-        agent_id: Agent ID (agent_name), optional
-        is_common: Whether the secret is common to all agents
-        
+        name: Secret field name (unused for path construction).
+        user_id: Vault user id (can be a logical id from header).
+        agent_id: Agent identifier (model string); will be sanitized.
+        is_common: If True, use "common" scope.
+
     Returns:
-        str: Formatted secret key path
+        str: Formatted secret base path (relative to mount point).
     """
     if is_common:
-        # For common connections, use 'common' as the agent name
-        return f"users/{user_id}/common_{name}"
+        agent_name = "common"
     elif agent_id:
-        return f"users/{user_id}/{agent_id}_{name}"
+        agent_name = sanitize_agent_name(agent_id)
     else:
-        # If no agent_id specified, use 'default' as the agent name
-        return f"users/{user_id}/default_{name}"
+        agent_name = "default"
+    return f"users/{user_id}/{agent_name}"
 
 
 def store_agent_connection_in_vault(connection: Dict[str, Any], user_id: str) -> bool:
-    """Store an agent connection in Vault with AES encryption.
-    
+    """Store/update an agent connection value in Vault without extra encryption.
+
+    New schema:
+      - Path: users/<user_id>/<agent_name>
+      - Secret data: { <key_name>: <plain_value>, ... }
+
     Args:
-        connection: Agent connection data
-        user_id: User ID for the path structure
-        
+        connection: Agent connection data containing 'name', 'value', optional 'agent_id', 'is_common'.
+        user_id: Vault user id (may come from header).
+
     Returns:
         bool: True if successful, False otherwise
     """
     if not ENABLE_VAULT_INTEGRATION:
         return False
-    
+
     client = get_vault_client()
     if not client:
         return False
-    
+
     name = connection.get("name")
     value = connection.get("value")
     is_common = connection.get("is_common", False)
     agent_id = connection.get("agent_id")
-    
+
     if not name or value is None:
         return False
-    
+
     try:
-        # Encrypt the value before storing
-        encrypted_value = _encrypt_value(str(value))
-        
-        key = format_secret_key(name, user_id, agent_id, is_common)
-        data = {"value": encrypted_value}
-        
-        return client.set_secret(key, data)
+        path = format_secret_key(name, user_id, agent_id, is_common)
+        # Merge with existing data to preserve other keys under the same agent secret
+        existing = client.get_secret(path) or {}
+        existing[name] = str(value)
+        return client.set_secret(path, existing)
     except Exception as e:
         logger.error(f"Failed to store agent connection in vault: {str(e)}")
         return False
@@ -362,32 +323,31 @@ def get_agent_connection_from_vault(
     is_common: bool = False,
     agent_id: Optional[str] = None
 ) -> Optional[str]:
-    """Get an agent connection from Vault and decrypt it.
-    
+    """Get an agent connection value from Vault without extra decryption.
+
     Args:
-        name: Secret name
-        user_id: User ID for the path structure
-        is_common: Whether the secret is common to all agents
-        agent_id: Agent ID if not common
-        
+        name: Field name within the Vault secret.
+        user_id: Vault user id.
+        is_common: Whether the secret is common to all agents.
+        agent_id: Agent identifier (model string) for agent-specific scope.
+
     Returns:
-        Optional[str]: Decrypted secret value or None if not found
+        Optional[str]: Secret value or None if not found.
     """
     if not ENABLE_VAULT_INTEGRATION:
         return None
-    
+
     client = get_vault_client()
     if not client:
         return None
-    
+
     try:
-        key = format_secret_key(name, user_id, agent_id, is_common)
-        secret = client.get_secret(key)
-        
-        if secret and "value" in secret:
-            # Decrypt the value before returning
-            return _decrypt_value(secret["value"])
-        
+        path = format_secret_key(name, user_id, agent_id, is_common)
+        secret = client.get_secret(path)
+
+        if secret and name in secret:
+            return secret[name]
+
         return None
     except Exception as e:
         logger.error(f"Failed to get agent connection from vault: {str(e)}")
@@ -400,27 +360,38 @@ def delete_agent_connection_from_vault(
     is_common: bool = False,
     agent_id: Optional[str] = None
 ) -> bool:
-    """Delete an agent connection from Vault.
-    
+    """Delete an agent connection field from Vault.
+
+    If the secret has no fields left after deletion, remove the secret path.
+
     Args:
-        name: Secret name
-        user_id: User ID for the path structure
-        is_common: Whether the secret is common to all agents
-        agent_id: Agent ID if not common
-        
+        name: Field name to remove.
+        user_id: Vault user id.
+        is_common: Whether the secret is common to all agents.
+        agent_id: Agent identifier (model string) for agent-specific scope.
+
     Returns:
         bool: True if successful, False otherwise
     """
     if not ENABLE_VAULT_INTEGRATION:
         return False
-    
+
     client = get_vault_client()
     if not client:
         return False
-    
+
     try:
-        key = format_secret_key(name, user_id, agent_id, is_common)
-        return client.delete_secret(key)
+        path = format_secret_key(name, user_id, agent_id, is_common)
+        secret = client.get_secret(path)
+        if not secret or name not in secret:
+            # Nothing to delete; treat as success to avoid unnecessary errors
+            return True
+        # Remove the field and update or delete the secret
+        secret.pop(name, None)
+        if secret:
+            return client.set_secret(path, secret)
+        else:
+            return client.delete_secret(path)
     except Exception as e:
         logger.error(f"Failed to delete agent connection from vault: {str(e)}")
         return False

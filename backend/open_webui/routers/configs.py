@@ -100,14 +100,22 @@ async def get_agent_connections_config(request: Request, user=Depends(get_verifi
             # If it's already a list, use it directly
             connections = agent_connections if isinstance(agent_connections, list) else []
         
+        # Headers for Vault
+        vault_user_id = request.headers.get('x-ltai-vault-user') or user.id
+        raw_keys = request.headers.get('x-ltai-vault-keys')
+        requested_keys = set(k.strip() for k in raw_keys.split(',')) if raw_keys else None
+
         # If Vault integration is enabled, fetch secrets from Vault
         if ENABLE_VAULT_INTEGRATION.value:
             updated_connections = []
             for conn in connections:
+                # Filter by requested keys if provided
+                if requested_keys and conn.get("name") not in requested_keys:
+                    continue
                 # Try to get the value from Vault
                 vault_value = get_agent_connection_from_vault(
                     name=conn.get("name"),
-                    user_id=user.id,
+                    user_id=vault_user_id,
                     is_common=conn.get("is_common", False),
                     agent_id=conn.get("agent_id")
                 )
@@ -140,14 +148,22 @@ async def get_agent_connections_config(request: Request, user=Depends(get_verifi
         if conn.get("is_common", False) or (conn.get("agent_id") and conn.get("agent_id") in user_agents)
     ]
     
+    # Headers for Vault
+    vault_user_id = request.headers.get('x-ltai-vault-user') or user.id
+    raw_keys = request.headers.get('x-ltai-vault-keys')
+    requested_keys = set(k.strip() for k in raw_keys.split(',')) if raw_keys else None
+
     # If Vault integration is enabled, fetch secrets from Vault
     if ENABLE_VAULT_INTEGRATION.value:
         updated_connections = []
         for conn in user_connections:
+            # Filter by requested keys if provided
+            if requested_keys and conn.get("name") not in requested_keys:
+                continue
             # Try to get the value from Vault
             vault_value = get_agent_connection_from_vault(
                 name=conn.get("name"),
-                user_id=user.id,
+                user_id=vault_user_id,
                 is_common=conn.get("is_common", False),
                 agent_id=conn.get("agent_id")
             )
@@ -175,9 +191,11 @@ async def set_agent_connections_config(
     
     # If Vault integration is enabled, store secrets in Vault
     if ENABLE_VAULT_INTEGRATION.value:
+        # Use header override for Vault user id if provided
+        vault_user_id = request.headers.get('x-ltai-vault-user') or user.id
         for connection in connections:
             # Store the secret in Vault
-            success = store_agent_connection_in_vault(connection, user.id)
+            success = store_agent_connection_in_vault(connection, vault_user_id)
             
             # If successfully stored in Vault, remove the value from the connection
             # to avoid storing it in the database

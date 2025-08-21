@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
@@ -9,7 +9,6 @@ from open_webui.utils.vault import (
     get_agent_connection_from_vault,
     delete_agent_connection_from_vault,
     get_vault_client,
-    ENABLE_VAULT_INTEGRATION
 )
 from open_webui.config import ENABLE_VAULT_INTEGRATION as VAULT_CONFIG
 from open_webui.models.users import Users
@@ -46,6 +45,7 @@ class AgentConnectionUpdate(BaseModel):
 @router.post("/", response_model=AgentConnectionResponse)
 async def create_agent_connection(
     connection: AgentConnectionCreate,
+    request: Request,
     user=Depends(get_verified_user)
 ):
     """Create or update a key in Vault."""
@@ -58,10 +58,6 @@ async def create_agent_connection(
         if not connection.key_name.replace('_', '').isalnum():
             raise HTTPException(status_code=400, detail="Key name must be alphanumeric with underscores only")
         
-        # Check if user is admin when creating common connections
-        if connection.is_common and user.role != "admin":
-            raise HTTPException(status_code=403, detail="Only administrators can create common connections")
-        
         # Prepare connection data for vault
         vault_connection = {
             "name": connection.key_name,
@@ -72,15 +68,16 @@ async def create_agent_connection(
         
         # Store in vault if enabled
         if VAULT_CONFIG.value:
-            success = store_agent_connection_in_vault(vault_connection, user.id)
+            vault_user_id = request.headers.get('x-ltai-vault-user') or user.id
+            success = store_agent_connection_in_vault(vault_connection, vault_user_id)
             if not success:
                 raise HTTPException(status_code=500, detail="Failed to store key in Vault")
         
         # Log the operation
-        logger.info(f"Stored key {connection.key_name} for user {user.id} (agent: {connection.agent_id or 'common' if connection.is_common else 'default'})")
+        logger.info(f"Stored key {connection.key_name} for user {vault_user_id} (agent: {connection.agent_id or 'common' if connection.is_common else 'default'})")
         
-        # Generate a key ID (using user_id + key_name + agent_id for uniqueness)
-        key_id = f"{user.id}_{connection.key_name}_{connection.agent_id or ('common' if connection.is_common else 'default')}"
+        # Generate a key ID (using vault_user_id + key_name + agent_id for uniqueness)
+        key_id = f"{vault_user_id}_{connection.key_name}_{connection.agent_id or ('common' if connection.is_common else 'default')}"
         
         return AgentConnectionResponse(
             key_id=key_id,
@@ -98,7 +95,7 @@ async def create_agent_connection(
 
 
 @router.get("/", response_model=List[AgentConnectionResponse])
-async def list_agent_connections(user=Depends(get_verified_user)):
+async def list_agent_connections(request: Request, user=Depends(get_verified_user)):
     """List keys for a user."""
     try:
         connections = []
@@ -108,27 +105,35 @@ async def list_agent_connections(user=Depends(get_verified_user)):
             vault_client = get_vault_client()
             if vault_client and vault_client.connect():
                 try:
-                    # List all secrets under users/{user_id}/
-                    user_path = f"users/{user.id}"
+                    # Determine target vault user and requested keys
+                    vault_user_id = request.headers.get('x-ltai-vault-user') or user.id
+                    raw_keys = request.headers.get('x-ltai-vault-keys')
+                    requested_keys = set(k.strip() for k in raw_keys.split(',')) if raw_keys else None
+
+                    # List agent scopes under users/{vault_user_id}/ (each key is an agent_name)
+                    user_path = f"users/{vault_user_id}"
                     response = vault_client.client.secrets.kv.v1.list_secrets(
                         path=user_path,
                         mount_point=vault_client.mount_path
                     )
                     if response and 'data' in response and 'keys' in response['data']:
-                        for key in response['data']['keys']:
-                            # Parse the key format: {agent_name}_{key_name}
-                            if '_' in key:
-                                parts = key.split('_', 1)
-                                if len(parts) == 2:
-                                    agent_scope, key_name = parts
-                                    
-                                    # Determine if it's common, default, or specific agent
+                        for agent_scope in response['data']['keys']:
+                            # Remove trailing slash if any
+                            agent_scope = agent_scope[:-1] if agent_scope.endswith('/') else agent_scope
+                            # Read secret at users/{user_id}/{agent_scope} to get fields
+                            secret_path = f"users/{vault_user_id}/{agent_scope}"
+                            secret = vault_client.client.secrets.kv.v1.read_secret(
+                                path=secret_path,
+                                mount_point=vault_client.mount_path
+                            )
+                            data = secret.get('data') if secret else None
+                            if data:
+                                for key_name in data.keys():
+                                    if requested_keys and key_name not in requested_keys:
+                                        continue
                                     is_common = agent_scope == "common"
                                     agent_id = None if agent_scope in ["common", "default"] else agent_scope
-                                    
-                                    # Generate key_id for consistency
-                                    key_id = f"{user.id}_{key_name}_{agent_scope}"
-                                    
+                                    key_id = f"{vault_user_id}_{key_name}_{agent_scope}"
                                     connections.append(AgentConnectionResponse(
                                         key_id=key_id,
                                         key_name=key_name,
@@ -136,7 +141,6 @@ async def list_agent_connections(user=Depends(get_verified_user)):
                                         is_common=is_common,
                                         created_at=datetime.now()  # We don't have actual creation time from Vault
                                     ))
-                                    
                 except Exception as e:
                     # If listing fails (e.g., path doesn't exist), just return empty list
                     logger.debug(f"No agent connections found for user {user.id}: {str(e)}")
@@ -161,7 +165,7 @@ async def list_all_agent_connections(user=Depends(get_admin_user)):
             vault_client = get_vault_client()
             if vault_client and vault_client.connect():
                 try:
-                    # List all secrets under users/ prefix
+                    # List all users under users/ prefix
                     response = vault_client.client.secrets.kv.v1.list_secrets(
                         path="users",
                         mount_point=vault_client.mount_path
@@ -179,27 +183,26 @@ async def list_all_agent_connections(user=Depends(get_admin_user)):
                             user_info = all_users.get(user_id)
                             
                             try:
-                                # List secrets for this user
+                                # List agent scopes for this user
                                 user_response = vault_client.client.secrets.kv.v1.list_secrets(
                                     path=f"users/{user_id}",
                                     mount_point=vault_client.mount_path
                                 )
                                 
                                 if user_response and 'data' in user_response and 'keys' in user_response['data']:
-                                    for key in user_response['data']['keys']:
-                                        # Parse the key format: {agent_name}_{key_name}
-                                        if '_' in key:
-                                            parts = key.split('_', 1)
-                                            if len(parts) == 2:
-                                                agent_scope, key_name = parts
-                                                
-                                                # Determine if it's common, default, or specific agent
+                                    for agent_scope in user_response['data']['keys']:
+                                        agent_scope = agent_scope[:-1] if agent_scope.endswith('/') else agent_scope
+                                        secret_path = f"users/{user_id}/{agent_scope}"
+                                        secret = vault_client.client.secrets.kv.v1.read_secret(
+                                            path=secret_path,
+                                            mount_point=vault_client.mount_path
+                                        )
+                                        data = secret.get('data') if secret else None
+                                        if data:
+                                            for key_name in data.keys():
                                                 is_common = agent_scope == "common"
                                                 agent_id = None if agent_scope in ["common", "default"] else agent_scope
-                                                
-                                                # Generate key_id for consistency
                                                 key_id = f"{user_id}_{key_name}_{agent_scope}"
-                                                
                                                 connections.append(AgentConnectionResponse(
                                                     key_id=key_id,
                                                     key_name=key_name,
@@ -210,7 +213,6 @@ async def list_all_agent_connections(user=Depends(get_admin_user)):
                                                     user_name=user_info.name if user_info else None,
                                                     user_email=user_info.email if user_info else None
                                                 ))
-                                                
                             except Exception as e:
                                 # If listing fails for a user, just skip them
                                 logger.debug(f"No agent connections found for user {user_id}: {str(e)}")
@@ -231,6 +233,7 @@ async def list_all_agent_connections(user=Depends(get_admin_user)):
 @router.get("/{key_id}", response_model=dict)
 async def get_agent_connection(
     key_id: str,
+    request: Request,
     user=Depends(get_verified_user)
 ):
     """Get a specific agent connection by key_id."""
@@ -257,7 +260,7 @@ async def get_agent_connection(
         if VAULT_CONFIG.value:
             value = get_agent_connection_from_vault(
                 name=key_name,
-                user_id=user_id_from_key,
+                user_id=request.headers.get('x-ltai-vault-user') or user_id_from_key,
                 is_common=is_common,
                 agent_id=agent_id
             )
@@ -286,6 +289,7 @@ async def get_agent_connection(
 async def update_agent_connection(
     key_id: str,
     connection: AgentConnectionUpdate,
+    request: Request,
     user=Depends(get_verified_user)
 ):
     """Update an existing agent connection."""
@@ -312,7 +316,7 @@ async def update_agent_connection(
         if not connection.key_value and VAULT_CONFIG.value:
             current_value = get_agent_connection_from_vault(
                 name=current_key_name,
-                user_id=user_id_from_key,
+                user_id=request.headers.get('x-ltai-vault-user') or user_id_from_key,
                 is_common=is_common,
                 agent_id=agent_id
             )
@@ -329,10 +333,6 @@ async def update_agent_connection(
         if new_key_name != current_key_name and not new_key_name.replace('_', '').isalnum():
             raise HTTPException(status_code=400, detail="Key name must be alphanumeric with underscores only")
         
-        # Check if user is admin when trying to make a connection common
-        if new_is_common and not is_common and user.role != "admin":
-            raise HTTPException(status_code=403, detail="Only administrators can create common connections")
-        
         # If key name or scope changed, delete old key first
         if (new_key_name != current_key_name or 
             new_agent_id != agent_id or 
@@ -341,7 +341,7 @@ async def update_agent_connection(
             if VAULT_CONFIG.value:
                 delete_agent_connection_from_vault(
                     name=current_key_name,
-                    user_id=user_id_from_key,
+                    user_id=request.headers.get('x-ltai-vault-user') or user_id_from_key,
                     is_common=is_common,
                     agent_id=agent_id
                 )
@@ -355,7 +355,8 @@ async def update_agent_connection(
         }
         
         if VAULT_CONFIG.value:
-            success = store_agent_connection_in_vault(vault_connection, user_id_from_key)
+            vault_user_id = request.headers.get('x-ltai-vault-user') or user_id_from_key
+            success = store_agent_connection_in_vault(vault_connection, vault_user_id)
             if not success:
                 raise HTTPException(status_code=500, detail="Failed to update key in Vault")
         
@@ -382,6 +383,7 @@ async def update_agent_connection(
 @router.delete("/{key_id}", response_model=dict)
 async def delete_agent_connection(
     key_id: str,
+    request: Request,
     user=Depends(get_verified_user)
 ):
     """Delete a key from Vault."""
@@ -407,7 +409,7 @@ async def delete_agent_connection(
         if VAULT_CONFIG.value:
             success = delete_agent_connection_from_vault(
                 name=key_name,
-                user_id=user_id_from_key,
+                user_id=request.headers.get('x-ltai-vault-user') or user_id_from_key,
                 is_common=is_common,
                 agent_id=agent_id
             )
