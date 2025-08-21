@@ -8,7 +8,6 @@ from open_webui.config import get_config, save_config
 from open_webui.config import BannerModel
 from open_webui.config import ENABLE_VAULT_INTEGRATION, VAULT_URL, VAULT_TOKEN, VAULT_MOUNT_PATH, VAULT_VERSION, VAULT_TIMEOUT, VAULT_VERIFY_SSL
 
-from open_webui.utils.tools import get_tool_server_data, get_tool_servers_data
 from open_webui.utils.vault import test_vault_connection, store_agent_connection_in_vault, get_agent_connection_from_vault, delete_agent_connection_from_vault
 
 
