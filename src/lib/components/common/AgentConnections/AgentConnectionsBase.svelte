@@ -155,7 +155,7 @@
 		<div class="text-xl font-bold">{$i18n.t(title)}</div>
 		{#if showAddButton}
 			<button
-				class="px-3 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg:white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
+				class="px-3 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
 				on:click={() => {
 					showAddModal = true;
 				}}
