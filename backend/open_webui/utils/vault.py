@@ -6,7 +6,7 @@ secrets in HashiCorp Vault instead of the local database.
 """
 
 import os
-import re
+from urllib.parse import quote
 from typing import Dict, Any, Optional, List, Tuple
 
 import hvac
@@ -25,24 +25,24 @@ VAULT_VERIFY_SSL = os.environ.get("VAULT_VERIFY_SSL", "true").lower() == "true"
 
 
 def sanitize_agent_name(agent_identifier: Optional[str]) -> str:
-    """Sanitize an agent/model identifier into a Vault-safe agent name.
+    """URL-encode an agent/model identifier into a Vault-safe path segment.
 
-    - Extract substring before the first colon ':' if present.
-    - Replace all non-alphanumeric characters with underscores.
+    - Encodes the full identifier with RFC 3986 percent-encoding.
+    - Ensures no '/' or special characters create path issues.
 
     Args:
         agent_identifier: The agent/model identifier string.
 
     Returns:
-        str: Sanitized agent name.
+        str: URL-encoded agent name suitable as a single path segment.
     """
     if not agent_identifier:
         return "default"
-    # Take part before ':' if exists
-    head = agent_identifier.split(":", 1)[0]
-    # Replace non-alphanumeric characters with underscores
-    sanitized = re.sub(r"[^A-Za-z0-9]", "_", head)
-    return sanitized if sanitized else "default"
+    encoded = quote(str(agent_identifier), safe="")
+    return encoded if encoded else "default"
+
+
+ 
 
 
 class VaultClient:
@@ -310,7 +310,11 @@ def store_agent_connection_in_vault(connection: Dict[str, Any], user_id: str) ->
         path = format_secret_key(name, user_id, agent_id, is_common)
         # Merge with existing data to preserve other keys under the same agent secret
         existing = client.get_secret(path) or {}
-        existing[name] = str(value)
+        encoded_name = quote(name, safe="")
+        # Cleanup: if an old unencoded key exists, remove it
+        if name in existing and name != encoded_name:
+            existing.pop(name, None)
+        existing[encoded_name] = str(value)
         return client.set_secret(path, existing)
     except Exception as e:
         logger.error(f"Failed to store agent connection in vault: {str(e)}")
@@ -342,11 +346,13 @@ def get_agent_connection_from_vault(
         return None
 
     try:
+        # Read from the URL-encoded path only
         path = format_secret_key(name, user_id, agent_id, is_common)
         secret = client.get_secret(path)
-
-        if secret and name in secret:
-            return secret[name]
+        if secret:
+            encoded_name = quote(name, safe="")
+            if encoded_name in secret:
+                return secret[encoded_name]
 
         return None
     except Exception as e:
@@ -381,17 +387,21 @@ def delete_agent_connection_from_vault(
         return False
 
     try:
+        # Attempt deletion on the URL-encoded path only
         path = format_secret_key(name, user_id, agent_id, is_common)
         secret = client.get_secret(path)
-        if not secret or name not in secret:
-            # Nothing to delete; treat as success to avoid unnecessary errors
-            return True
-        # Remove the field and update or delete the secret
-        secret.pop(name, None)
+        deleted_any = False
         if secret:
-            return client.set_secret(path, secret)
-        else:
-            return client.delete_secret(path)
+            encoded_name = quote(name, safe="")
+            if encoded_name in secret:
+                secret.pop(encoded_name, None)
+            if secret:
+                deleted_any = client.set_secret(path, secret)
+            else:
+                deleted_any = client.delete_secret(path)
+
+        # If path/field didn't exist, treat as success
+        return True if not deleted_any else deleted_any
     except Exception as e:
         logger.error(f"Failed to delete agent connection from vault: {str(e)}")
         return False

@@ -155,10 +155,11 @@
 		<div class="text-xl font-bold">{$i18n.t(title)}</div>
 		{#if showAddButton}
 			<button
-				class="px-3 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
+				class="px-3 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg:white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
 				on:click={() => {
 					showAddModal = true;
 				}}
+				data-cy="add-connection-button"
 			>
 				{$i18n.t('Add Connection')}
 			</button>
@@ -179,11 +180,13 @@
 						type="text"
 						placeholder={$i18n.t('Search connections...')}
 						bind:value={searchTerm}
+						data-cy="search-connections"
 					/>
 					{#if searchTerm}
 						<button
 							class="px-2 py-1.5 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition"
 							on:click={() => { searchTerm = ''; }}
+							data-cy="clear-search"
 						>
 							{$i18n.t('Clear')}
 						</button>
@@ -239,7 +242,7 @@
 
 			<!-- Pagination controls -->
 			{#if totalPages > 1}
-				<div class="flex justify-center mt-4 space-x-2 text-sm">
+				<div class="flex justify-center mt-4 space-x-2 text-sm" data-cy="pagination-controls">
 					<button
 						class="px-2 py-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-40"
 						disabled={currentPage === 1}
@@ -259,6 +262,7 @@
 						class="px-2 py-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-40"
 						disabled={currentPage === totalPages}
 						on:click={() => goToPage(currentPage + 1)}
+						data-cy="pagination-next"
 					>
 						Next
 					</button>

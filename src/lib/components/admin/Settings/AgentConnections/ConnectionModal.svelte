@@ -84,8 +84,8 @@ $: if (mode === 'add' || !connection) {
   }
 }
 
-// Validate connection name (alphanumeric, no spaces)
-const validateConnectionName = (n: string) => /^[a-zA-Z0-9_]+$/.test(n);
+// Validate connection name (no strict validation, allow arbitrary characters)
+const validateConnectionName = (n: string) => n.length > 0;
 
 function close() {
   // Reset form and state when closing
@@ -106,16 +106,8 @@ async function handleSubmit(e: Event) {
     toast.error($i18n.t('Name is required'));
     return;
   }
-  if (!validateConnectionName(name)) {
-    toast.error($i18n.t('Name must be alphanumeric with no spaces'));
-    return;
-  }
   if (mode === 'add' && !value) {
     toast.error($i18n.t('Value is required'));
-    return;
-  }
-  if (is_common && $user?.role !== 'admin') {
-    toast.error($i18n.t('Only administrators can create common connections'));
     return;
   }
   
@@ -168,12 +160,13 @@ function confirmDelete() {
                   class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
                   type="text" 
                   bind:value={name} 
-                  placeholder={$i18n.t('Enter connection name (alphanumeric, underscores only)')} 
+                  placeholder={$i18n.t('Enter connection name (any characters allowed)')} 
                   autocomplete="off" 
+                  data-cy="connection-name"
                   required 
                 />
               </div>
-              <div class="mt-1 text-xs text-gray-500">{$i18n.t('Must be alphanumeric with no spaces')}</div>
+              <div class="mt-1 text-xs text-gray-500">{$i18n.t('Any characters allowed, e.g., "car/hummer"')}</div>
             </div>
             <div class="flex flex-col w-full mb-3">
               <div class="mb-1 text-sm font-medium text-gray-700 dark:text-gray-300">{$i18n.t('Value')}</div>
@@ -182,6 +175,7 @@ function confirmDelete() {
                   inputClassName="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   bind:value={value}
                   placeholder={mode === 'edit' ? $i18n.t('Enter new value or leave empty to keep current') : $i18n.t('Enter connection value (API key, token, etc.)')}
+                  data-cy="connection-value"
                   required={mode === 'add'}
                 />
               </div>
@@ -195,21 +189,10 @@ function confirmDelete() {
                 <div class="text-sm font-medium text-gray-700 dark:text-gray-300">{$i18n.t('Common Connection')}</div>
                 <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
                   {is_common ? $i18n.t('This connection will be available to all agents') : $i18n.t('This connection can be assigned to a specific agent')}
-                  {#if $user?.role !== 'admin'}
-                    <div class="text-xs text-orange-600 dark:text-orange-400 mt-1">
-                      {$i18n.t('Only administrators can create common connections')}
-                    </div>
-                  {/if}
                 </div>
               </div>
               <div class="flex items-center">
-                {#if $user?.role !== 'admin'}
-                  <Tooltip content={$i18n.t('Only administrators can create common connections')}>
-                    <Switch bind:state={is_common} disabled={true} data-cy="connection-is-common" />
-                  </Tooltip>
-                {:else}
-                  <Switch bind:state={is_common} data-cy="connection-is-common" />
-                {/if}
+                <Switch bind:state={is_common} data-cy="connection-is-common" />
               </div>
             </div>
 
@@ -220,6 +203,7 @@ function confirmDelete() {
                   <select 
                     class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
                     bind:value={agent_id}
+                    data-cy="connection-agent-id"
                   >
                     <option value="">{$i18n.t('Select agent or leave empty for all')}</option>
                     {#each availableAgentIds as agentId}
@@ -245,6 +229,7 @@ function confirmDelete() {
             <button 
               type="submit" 
               disabled={saving}
+              data-cy={mode === 'add' ? 'create-connection-button' : 'update-connection-button'}
               class="px-4 py-2 text-sm font-medium bg-black hover:bg-gray-900 disabled:bg-gray-500 disabled:cursor-not-allowed text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 dark:disabled:bg-gray-600 dark:disabled:text-gray-300 transition rounded-lg flex items-center gap-2"
             >
               {#if saving}

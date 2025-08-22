@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
+from urllib.parse import unquote, quote
 
 from open_webui.utils.auth import get_verified_user, get_admin_user
 from open_webui.utils.vault import (
@@ -54,10 +55,6 @@ async def create_agent_connection(
         if not connection.key_name or not connection.key_value:
             raise HTTPException(status_code=400, detail="Key name and value are required")
         
-        # Validate key name (alphanumeric and underscores only)
-        if not connection.key_name.replace('_', '').isalnum():
-            raise HTTPException(status_code=400, detail="Key name must be alphanumeric with underscores only")
-        
         # Prepare connection data for vault
         vault_connection = {
             "name": connection.key_name,
@@ -67,8 +64,8 @@ async def create_agent_connection(
         }
         
         # Store in vault if enabled
+        vault_user_id = request.headers.get('x-ltai-vault-user') or user.id
         if VAULT_CONFIG.value:
-            vault_user_id = request.headers.get('x-ltai-vault-user') or user.id
             success = store_agent_connection_in_vault(vault_connection, vault_user_id)
             if not success:
                 raise HTTPException(status_code=500, detail="Failed to store key in Vault")
@@ -76,8 +73,13 @@ async def create_agent_connection(
         # Log the operation
         logger.info(f"Stored key {connection.key_name} for user {vault_user_id} (agent: {connection.agent_id or 'common' if connection.is_common else 'default'})")
         
-        # Generate a key ID (using vault_user_id + key_name + agent_id for uniqueness)
-        key_id = f"{vault_user_id}_{connection.key_name}_{connection.agent_id or ('common' if connection.is_common else 'default')}"
+        # Generate a path-safe key ID (encode agent_id part)
+        scope_for_id = (
+            'common' if connection.is_common else (
+                'default' if not connection.agent_id else quote(connection.agent_id, safe='')
+            )
+        )
+        key_id = f"{vault_user_id}_{connection.key_name}_{scope_for_id}"
         
         return AgentConnectionResponse(
             key_id=key_id,
@@ -120,6 +122,7 @@ async def list_agent_connections(request: Request, user=Depends(get_verified_use
                         for agent_scope in response['data']['keys']:
                             # Remove trailing slash if any
                             agent_scope = agent_scope[:-1] if agent_scope.endswith('/') else agent_scope
+                            agent_scope_decoded = unquote(agent_scope)
                             # Read secret at users/{user_id}/{agent_scope} to get fields
                             secret_path = f"users/{vault_user_id}/{agent_scope}"
                             secret = vault_client.client.secrets.kv.v1.read_secret(
@@ -131,8 +134,9 @@ async def list_agent_connections(request: Request, user=Depends(get_verified_use
                                 for key_name in data.keys():
                                     if requested_keys and key_name not in requested_keys:
                                         continue
-                                    is_common = agent_scope == "common"
-                                    agent_id = None if agent_scope in ["common", "default"] else agent_scope
+                                    is_common = agent_scope_decoded == "common"
+                                    agent_id = None if agent_scope_decoded in ["common", "default"] else agent_scope_decoded
+                                    # Use encoded scope for key_id to avoid slashes
                                     key_id = f"{vault_user_id}_{key_name}_{agent_scope}"
                                     connections.append(AgentConnectionResponse(
                                         key_id=key_id,
@@ -192,6 +196,7 @@ async def list_all_agent_connections(user=Depends(get_admin_user)):
                                 if user_response and 'data' in user_response and 'keys' in user_response['data']:
                                     for agent_scope in user_response['data']['keys']:
                                         agent_scope = agent_scope[:-1] if agent_scope.endswith('/') else agent_scope
+                                        agent_scope_decoded = unquote(agent_scope)
                                         secret_path = f"users/{user_id}/{agent_scope}"
                                         secret = vault_client.client.secrets.kv.v1.read_secret(
                                             path=secret_path,
@@ -200,8 +205,9 @@ async def list_all_agent_connections(user=Depends(get_admin_user)):
                                         data = secret.get('data') if secret else None
                                         if data:
                                             for key_name in data.keys():
-                                                is_common = agent_scope == "common"
-                                                agent_id = None if agent_scope in ["common", "default"] else agent_scope
+                                                is_common = agent_scope_decoded == "common"
+                                                agent_id = None if agent_scope_decoded in ["common", "default"] else agent_scope_decoded
+                                                # Use encoded scope for key_id to avoid slashes
                                                 key_id = f"{user_id}_{key_name}_{agent_scope}"
                                                 connections.append(AgentConnectionResponse(
                                                     key_id=key_id,
@@ -230,7 +236,7 @@ async def list_all_agent_connections(user=Depends(get_admin_user)):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.get("/{key_id}", response_model=dict)
+@router.get("/{key_id:path}", response_model=dict)
 async def get_agent_connection(
     key_id: str,
     request: Request,
@@ -239,22 +245,25 @@ async def get_agent_connection(
     """Get a specific agent connection by key_id."""
     try:
         # Parse key_id to extract components
-        # Format: user_id_key_name_agent_or_scope
-        parts = key_id.split('_', 3)
-        if len(parts) < 3:
+        # Format: user_id_key_name_agent_or_scope (key_name can contain underscores)
+        first_sep = key_id.find('_')
+        last_sep = key_id.rfind('_')
+        if first_sep == -1 or last_sep == -1 or last_sep <= first_sep:
             raise HTTPException(status_code=400, detail="Invalid key_id format")
-        
-        user_id_from_key = parts[0]
-        key_name = parts[1]
-        agent_scope = parts[2] if len(parts) > 2 else "default"
+        user_id_from_key = key_id[:first_sep]
+        agent_scope = key_id[last_sep+1:]
+        agent_scope_decoded = unquote(agent_scope)
+        key_name = key_id[first_sep+1:last_sep]
+        if not key_name:
+            raise HTTPException(status_code=400, detail="Invalid key_id format")
         
         # Check if user has access to this key
         if user_id_from_key != user.id and user.role != "admin":
             raise HTTPException(status_code=403, detail="Access denied")
         
         # Determine if it's a common key
-        is_common = agent_scope == "common"
-        agent_id = None if is_common or agent_scope == "default" else agent_scope
+        is_common = agent_scope_decoded == "common"
+        agent_id = None if is_common or agent_scope_decoded == "default" else agent_scope_decoded
         
         # Get from vault
         if VAULT_CONFIG.value:
@@ -285,7 +294,7 @@ async def get_agent_connection(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.put("/{key_id}", response_model=AgentConnectionResponse)
+@router.put("/{key_id:path}", response_model=AgentConnectionResponse)
 async def update_agent_connection(
     key_id: str,
     connection: AgentConnectionUpdate,
@@ -295,21 +304,24 @@ async def update_agent_connection(
     """Update an existing agent connection."""
     try:
         # Parse key_id to extract components
-        parts = key_id.split('_', 3)
-        if len(parts) < 3:
+        first_sep = key_id.find('_')
+        last_sep = key_id.rfind('_')
+        if first_sep == -1 or last_sep == -1 or last_sep <= first_sep:
             raise HTTPException(status_code=400, detail="Invalid key_id format")
-        
-        user_id_from_key = parts[0]
-        current_key_name = parts[1]
-        agent_scope = parts[2] if len(parts) > 2 else "default"
+        user_id_from_key = key_id[:first_sep]
+        agent_scope = key_id[last_sep+1:]
+        agent_scope_decoded = unquote(agent_scope)
+        current_key_name = key_id[first_sep+1:last_sep]
+        if not current_key_name:
+            raise HTTPException(status_code=400, detail="Invalid key_id format")
         
         # Check if user has access to this key
         if user_id_from_key != user.id and user.role != "admin":
             raise HTTPException(status_code=403, detail="Access denied")
         
         # Get current values if not provided in update
-        is_common = agent_scope == "common"
-        agent_id = None if is_common or agent_scope == "default" else agent_scope
+        is_common = agent_scope_decoded == "common"
+        agent_id = None if is_common or agent_scope_decoded == "default" else agent_scope_decoded
         
         # Get current value if not updating it
         current_value = None
@@ -329,10 +341,8 @@ async def update_agent_connection(
         new_agent_id = connection.agent_id if connection.agent_id is not None else agent_id
         new_is_common = connection.is_common if connection.is_common is not None else is_common
         
-        # Validate new key name if changed
-        if new_key_name != current_key_name and not new_key_name.replace('_', '').isalnum():
-            raise HTTPException(status_code=400, detail="Key name must be alphanumeric with underscores only")
-        
+        # No strict validation on key names; allow arbitrary strings
+
         # If key name or scope changed, delete old key first
         if (new_key_name != current_key_name or 
             new_agent_id != agent_id or 
@@ -360,8 +370,13 @@ async def update_agent_connection(
             if not success:
                 raise HTTPException(status_code=500, detail="Failed to update key in Vault")
         
-        # Generate new key ID
-        new_key_id = f"{user_id_from_key}_{new_key_name}_{new_agent_id or ('common' if new_is_common else 'default')}"
+        # Generate new key ID with encoded scope to be path-safe
+        new_scope_for_id = (
+            'common' if new_is_common else (
+                'default' if not new_agent_id else quote(new_agent_id, safe='')
+            )
+        )
+        new_key_id = f"{user_id_from_key}_{new_key_name}_{new_scope_for_id}"
         
         logger.info(f"Updated key {current_key_name} -> {new_key_name} for user {user_id_from_key}")
         
@@ -380,7 +395,7 @@ async def update_agent_connection(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.delete("/{key_id}", response_model=dict)
+@router.delete("/{key_id:path}", response_model=dict)
 async def delete_agent_connection(
     key_id: str,
     request: Request,
@@ -389,21 +404,24 @@ async def delete_agent_connection(
     """Delete a key from Vault."""
     try:
         # Parse key_id to extract components
-        parts = key_id.split('_', 3)
-        if len(parts) < 3:
+        first_sep = key_id.find('_')
+        last_sep = key_id.rfind('_')
+        if first_sep == -1 or last_sep == -1 or last_sep <= first_sep:
             raise HTTPException(status_code=400, detail="Invalid key_id format")
-        
-        user_id_from_key = parts[0]
-        key_name = parts[1]
-        agent_scope = parts[2] if len(parts) > 2 else "default"
+        user_id_from_key = key_id[:first_sep]
+        agent_scope = key_id[last_sep+1:]
+        agent_scope_decoded = unquote(agent_scope)
+        key_name = key_id[first_sep+1:last_sep]
+        if not key_name:
+            raise HTTPException(status_code=400, detail="Invalid key_id format")
         
         # Check if user has access to this key
         if user_id_from_key != user.id and user.role != "admin":
             raise HTTPException(status_code=403, detail="Access denied")
         
         # Determine scope
-        is_common = agent_scope == "common"
-        agent_id = None if is_common or agent_scope == "default" else agent_scope
+        is_common = agent_scope_decoded == "common"
+        agent_id = None if is_common or agent_scope_decoded == "default" else agent_scope_decoded
         
         # Delete from vault
         if VAULT_CONFIG.value:

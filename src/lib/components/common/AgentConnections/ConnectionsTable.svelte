@@ -16,7 +16,7 @@
   };
 </script>
 
-<table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+<table data-cy="connections-table" class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
   <thead class="bg-gray-50 dark:bg-gray-800">
     <tr>
       <th class="px-4 py-3 text-left font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 text-xs">Name</th>
@@ -61,12 +61,14 @@
           <td class="px-4 py-3 whitespace-nowrap text-center">
             <div class="flex justify-center space-x-2">
               <button
+                data-cy="edit-connection-button"
                 class="px-3 py-1 text-sm text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 rounded transition"
                 on:click={() => edit(i)}
               >
                 Edit
               </button>
               <button
+                data-cy="delete-connection-button"
                 class="px-3 py-1 text-sm text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 rounded transition"
                 on:click={() => del(i)}
               >
