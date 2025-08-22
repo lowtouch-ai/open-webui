@@ -1624,7 +1624,8 @@
 						}
 					: {})
 			},
-			`${WEBUI_BASE_URL}/api`
+			`${WEBUI_BASE_URL}/api`,
+			agentId
 		).catch((error) => {
 			toast.error(`${error}`);
 

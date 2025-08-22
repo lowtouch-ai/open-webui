@@ -342,15 +342,32 @@ export const chatCompletion = async (
 	const { buildVaultKeysHeader } = await import('$lib/utils/agent-connections');
 	const vaultKeys = await buildVaultKeysHeader(agentId);
 
+	// Get user ID for vault user header
+	const { get } = await import('svelte/store');
+	const { user } = await import('$lib/stores');
+	const currentUser = get(user);
+
 	const headers: Record<string, string> = {
 		Authorization: `Bearer ${token}`,
 		'Content-Type': 'application/json'
 	};
 
+	// Add vault user ID header
+	if (currentUser?.id) {
+		headers['X-LTAI-Vault-User'] = currentUser.id;
+	}
+
 	// Add vault keys header if we have connections
 	if (vaultKeys) {
 		headers['X-LTAI-Vault-Keys'] = vaultKeys;
 	}
+
+	// Log outgoing headers (sanitized) and agentId for debugging
+	console.log('[VaultKeys] chatCompletion headers:', {
+		agentId,
+		vaultUser: headers['X-LTAI-Vault-User'],
+		vaultKeys: headers['X-LTAI-Vault-Keys'] ?? '(none)'
+	});
 
 	const res = await fetch(`${url}/chat/completions`, {
 		signal: controller.signal,
@@ -382,15 +399,32 @@ export const generateOpenAIChatCompletion = async (
 	const { buildVaultKeysHeader } = await import('$lib/utils/agent-connections');
 	const vaultKeys = await buildVaultKeysHeader(agentId);
 
+	// Get user ID for vault user header
+	const { get } = await import('svelte/store');
+	const { user } = await import('$lib/stores');
+	const currentUser = get(user);
+
 	const headers: Record<string, string> = {
 		Authorization: `Bearer ${token}`,
 		'Content-Type': 'application/json'
 	};
 
+	// Add vault user ID header
+	if (currentUser?.id) {
+		headers['X-LTAI-Vault-User'] = currentUser.id;
+	}
+
 	// Add vault keys header if we have connections
 	if (vaultKeys) {
 		headers['X-LTAI-Vault-Keys'] = vaultKeys;
 	}
+
+	// Log outgoing headers (sanitized) and agentId for debugging
+	console.log('[VaultKeys] generateOpenAIChatCompletion headers:', {
+		agentId,
+		vaultUser: headers['X-LTAI-Vault-User'],
+		vaultKeys: headers['X-LTAI-Vault-Keys'] ?? '(none)'
+	});
 
 	const res = await fetch(`${url}/chat/completions`, {
 		method: 'POST',

@@ -1035,6 +1035,10 @@ async def chat_completion(
             request.state.direct = True
             request.state.model = model
 
+        # Extract vault headers for agent connection secrets
+        vault_user_id = request.headers.get('x-ltai-vault-user')
+        vault_keys = request.headers.get('x-ltai-vault-keys')
+
         metadata = {
             "user_id": user.id,
             "chat_id": form_data.pop("chat_id", None),
@@ -1046,6 +1050,8 @@ async def chat_completion(
             "variables": form_data.get("variables", None),
             "model": model,
             "direct": model_item.get("direct", False),
+            "vault_user_id": vault_user_id,
+            "vault_keys": vault_keys,
             **(
                 {"function_calling": "native"}
                 if form_data.get("params", {}).get("function_calling") == "native"
