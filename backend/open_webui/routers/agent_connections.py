@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
-from urllib.parse import unquote, quote
+ 
 
 from open_webui.utils.auth import get_verified_user, get_admin_user
 from open_webui.utils.vault import (
@@ -10,12 +10,49 @@ from open_webui.utils.vault import (
     get_agent_connection_from_vault,
     delete_agent_connection_from_vault,
     get_vault_client,
+    sanitize_agent_name,
+    sanitize_key_field,
 )
 from open_webui.config import ENABLE_VAULT_INTEGRATION as VAULT_CONFIG
 from open_webui.models.users import Users
 from loguru import logger
 
 router = APIRouter()
+
+
+def _parse_requested_items(raw_keys: Optional[str]) -> Optional[set[str]]:
+    """Return a set of slash-formatted header items from X-LTAI-Vault-Keys.
+
+    Accepted formats only:
+      - "COMMON/<key_name>"
+      - "<agent_scope>/<key_name>" where agent_scope is underscore-normalized
+    """
+    if not raw_keys:
+        return None
+    items = {k.strip() for k in raw_keys.split(',') if k.strip() and '/' in k}
+    return items if items else None
+
+
+def _is_requested_key(key_name: str, agent_scope: str, requested_items: Optional[set[str]]) -> bool:
+    """Decide if a given Vault field key_name should be included for a specific agent scope.
+
+    Only slash-formatted items are supported: "<scope>/<key>". The key portion may contain slashes.
+    Scope must match the current agent_scope ("common", "default", or underscore-normalized agent name).
+    Key name is compared against the SANITIZED header key (slashes/backslashes -> underscore),
+    because fields are stored sanitized in Vault.
+    """
+    if not requested_items:
+        return True
+    for item in requested_items:
+        if "/" not in item:
+            continue
+        scope_part, key_part = item.split("/", 1)
+        # Map "COMMON" header scope to stored path scope "common"
+        header_scope = "common" if scope_part == "COMMON" else scope_part
+        # Sanitize the key part to match stored field names
+        if header_scope == agent_scope and key_name == sanitize_key_field(key_part):
+            return True
+    return False
 
 
 class AgentConnectionCreate(BaseModel):
@@ -73,13 +110,14 @@ async def create_agent_connection(
         # Log the operation
         logger.info(f"Stored key {connection.key_name} for user {vault_user_id} (agent: {connection.agent_id or 'common' if connection.is_common else 'default'})")
         
-        # Generate a path-safe key ID (encode agent_id part)
+        # Generate a path-safe key ID using normalized underscore agent scope
         scope_for_id = (
             'common' if connection.is_common else (
-                'default' if not connection.agent_id else quote(connection.agent_id, safe='')
+                'default' if not connection.agent_id else sanitize_agent_name(connection.agent_id)
             )
         )
-        key_id = f"{vault_user_id}_{connection.key_name}_{scope_for_id}"
+        # Use sanitized key name in key_id for consistency with stored field names
+        key_id = f"{vault_user_id}_{sanitize_key_field(connection.key_name)}_{scope_for_id}"
         
         return AgentConnectionResponse(
             key_id=key_id,
@@ -110,7 +148,7 @@ async def list_agent_connections(request: Request, user=Depends(get_verified_use
                     # Determine target vault user and requested keys
                     vault_user_id = request.headers.get('x-ltai-vault-user') or user.id
                     raw_keys = request.headers.get('x-ltai-vault-keys')
-                    requested_keys = set(k.strip() for k in raw_keys.split(',')) if raw_keys else None
+                    requested_items = _parse_requested_items(raw_keys)
 
                     # List agent scopes under users/{vault_user_id}/ (each key is an agent_name)
                     user_path = f"users/{vault_user_id}"
@@ -122,7 +160,7 @@ async def list_agent_connections(request: Request, user=Depends(get_verified_use
                         for agent_scope in response['data']['keys']:
                             # Remove trailing slash if any
                             agent_scope = agent_scope[:-1] if agent_scope.endswith('/') else agent_scope
-                            agent_scope_decoded = unquote(agent_scope)
+                            agent_scope_decoded = agent_scope
                             # Read secret at users/{user_id}/{agent_scope} to get fields
                             secret_path = f"users/{vault_user_id}/{agent_scope}"
                             secret = vault_client.client.secrets.kv.v1.read_secret(
@@ -132,15 +170,17 @@ async def list_agent_connections(request: Request, user=Depends(get_verified_use
                             data = secret.get('data') if secret else None
                             if data:
                                 for key_name in data.keys():
-                                    if requested_keys and key_name not in requested_keys:
+                                    # Use raw field name (no URL decoding)
+                                    decoded_key_name = key_name
+                                    if requested_items and not _is_requested_key(decoded_key_name, agent_scope_decoded, requested_items):
                                         continue
                                     is_common = agent_scope_decoded == "common"
                                     agent_id = None if agent_scope_decoded in ["common", "default"] else agent_scope_decoded
                                     # Use encoded scope for key_id to avoid slashes
-                                    key_id = f"{vault_user_id}_{key_name}_{agent_scope}"
+                                    key_id = f"{vault_user_id}_{decoded_key_name}_{agent_scope}"
                                     connections.append(AgentConnectionResponse(
                                         key_id=key_id,
-                                        key_name=key_name,
+                                        key_name=decoded_key_name,
                                         agent_id=agent_id,
                                         is_common=is_common,
                                         created_at=datetime.now()  # We don't have actual creation time from Vault
@@ -196,7 +236,7 @@ async def list_all_agent_connections(user=Depends(get_admin_user)):
                                 if user_response and 'data' in user_response and 'keys' in user_response['data']:
                                     for agent_scope in user_response['data']['keys']:
                                         agent_scope = agent_scope[:-1] if agent_scope.endswith('/') else agent_scope
-                                        agent_scope_decoded = unquote(agent_scope)
+                                        agent_scope_decoded = agent_scope
                                         secret_path = f"users/{user_id}/{agent_scope}"
                                         secret = vault_client.client.secrets.kv.v1.read_secret(
                                             path=secret_path,
@@ -205,13 +245,14 @@ async def list_all_agent_connections(user=Depends(get_admin_user)):
                                         data = secret.get('data') if secret else None
                                         if data:
                                             for key_name in data.keys():
+                                                decoded_key_name = key_name
                                                 is_common = agent_scope_decoded == "common"
                                                 agent_id = None if agent_scope_decoded in ["common", "default"] else agent_scope_decoded
                                                 # Use encoded scope for key_id to avoid slashes
-                                                key_id = f"{user_id}_{key_name}_{agent_scope}"
+                                                key_id = f"{user_id}_{decoded_key_name}_{agent_scope}"
                                                 connections.append(AgentConnectionResponse(
                                                     key_id=key_id,
-                                                    key_name=key_name,
+                                                    key_name=decoded_key_name,
                                                     agent_id=agent_id,
                                                     is_common=is_common,
                                                     created_at=datetime.now(),  # We don't have actual creation time from Vault
@@ -252,7 +293,7 @@ async def get_agent_connection(
             raise HTTPException(status_code=400, detail="Invalid key_id format")
         user_id_from_key = key_id[:first_sep]
         agent_scope = key_id[last_sep+1:]
-        agent_scope_decoded = unquote(agent_scope)
+        agent_scope_decoded = agent_scope
         key_name = key_id[first_sep+1:last_sep]
         if not key_name:
             raise HTTPException(status_code=400, detail="Invalid key_id format")
@@ -310,7 +351,7 @@ async def update_agent_connection(
             raise HTTPException(status_code=400, detail="Invalid key_id format")
         user_id_from_key = key_id[:first_sep]
         agent_scope = key_id[last_sep+1:]
-        agent_scope_decoded = unquote(agent_scope)
+        agent_scope_decoded = agent_scope
         current_key_name = key_id[first_sep+1:last_sep]
         if not current_key_name:
             raise HTTPException(status_code=400, detail="Invalid key_id format")
@@ -373,10 +414,10 @@ async def update_agent_connection(
         # Generate new key ID with encoded scope to be path-safe
         new_scope_for_id = (
             'common' if new_is_common else (
-                'default' if not new_agent_id else quote(new_agent_id, safe='')
+                'default' if not new_agent_id else sanitize_agent_name(new_agent_id)
             )
         )
-        new_key_id = f"{user_id_from_key}_{new_key_name}_{new_scope_for_id}"
+        new_key_id = f"{user_id_from_key}_{sanitize_key_field(new_key_name)}_{new_scope_for_id}"
         
         logger.info(f"Updated key {current_key_name} -> {new_key_name} for user {user_id_from_key}")
         
@@ -410,7 +451,7 @@ async def delete_agent_connection(
             raise HTTPException(status_code=400, detail="Invalid key_id format")
         user_id_from_key = key_id[:first_sep]
         agent_scope = key_id[last_sep+1:]
-        agent_scope_decoded = unquote(agent_scope)
+        agent_scope_decoded = agent_scope
         key_name = key_id[first_sep+1:last_sep]
         if not key_name:
             raise HTTPException(status_code=400, detail="Invalid key_id format")

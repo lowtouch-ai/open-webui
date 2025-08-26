@@ -6,7 +6,7 @@ secrets in HashiCorp Vault instead of the local database.
 """
 
 import os
-from urllib.parse import quote
+import re
 from typing import Dict, Any, Optional, List, Tuple
 
 import hvac
@@ -25,24 +25,46 @@ VAULT_VERIFY_SSL = os.environ.get("VAULT_VERIFY_SSL", "true").lower() == "true"
 
 
 def sanitize_agent_name(agent_identifier: Optional[str]) -> str:
-    """URL-encode an agent/model identifier into a Vault-safe path segment.
+    """Normalize an agent/model identifier to an underscore-safe name.
 
-    - Encodes the full identifier with RFC 3986 percent-encoding.
-    - Ensures no '/' or special characters create path issues.
+    Rule:
+      - If the identifier contains a colon, take the substring BEFORE the first colon.
+      - Replace all non-alphanumeric characters with underscores ('_').
+      - Collapse consecutive non-alphanumerics into a single underscore.
+      - Trim leading/trailing underscores.
+      - If result is empty, fall back to "default".
+
+    Examples:
+      - "webshop-email:0.5" -> "webshop_email"
+      - "webshop/hr:0.3" -> "webshop_hr"
+      - "webshop@special#chars:1.0" -> "webshop_special_chars"
 
     Args:
         agent_identifier: The agent/model identifier string.
 
     Returns:
-        str: URL-encoded agent name suitable as a single path segment.
+        str: Underscore-normalized agent name suitable as a single path segment.
     """
     if not agent_identifier:
         return "default"
-    encoded = quote(str(agent_identifier), safe="")
-    return encoded if encoded else "default"
+    ident = str(agent_identifier)
+    # Take part before the first ':' if present
+    if ":" in ident:
+        ident = ident.split(":", 1)[0]
+    # Replace any run of non-alphanumeric chars with a single underscore
+    normalized = re.sub(r"[^A-Za-z0-9]+", "_", ident).strip("_")
+    return normalized if normalized else "default"
 
 
- 
+def sanitize_key_field(key: str) -> str:
+    """Sanitize a secret field (key name) to avoid path separator issues.
+
+    - Replace '/' and '\\' with '_'.
+    - Leave other characters as-is to preserve user-friendly names.
+    """
+    if key is None:
+        return key
+    return key.replace("/", "_").replace("\\", "_")
 
 
 class VaultClient:
@@ -310,11 +332,9 @@ def store_agent_connection_in_vault(connection: Dict[str, Any], user_id: str) ->
         path = format_secret_key(name, user_id, agent_id, is_common)
         # Merge with existing data to preserve other keys under the same agent secret
         existing = client.get_secret(path) or {}
-        encoded_name = quote(name, safe="")
-        # Cleanup: if an old unencoded key exists, remove it
-        if name in existing and name != encoded_name:
-            existing.pop(name, None)
-        existing[encoded_name] = str(value)
+        # Store using sanitized key field (replace path separators)
+        sanitized = sanitize_key_field(name)
+        existing[sanitized] = str(value)
         return client.set_secret(path, existing)
     except Exception as e:
         logger.error(f"Failed to store agent connection in vault: {str(e)}")
@@ -346,13 +366,13 @@ def get_agent_connection_from_vault(
         return None
 
     try:
-        # Read from the URL-encoded path only
+        # Primary: read from the normalized underscore path
         path = format_secret_key(name, user_id, agent_id, is_common)
         secret = client.get_secret(path)
         if secret:
-            encoded_name = quote(name, safe="")
-            if encoded_name in secret:
-                return secret[encoded_name]
+            sanitized = sanitize_key_field(name)
+            if sanitized in secret:
+                return secret[sanitized]
 
         return None
     except Exception as e:
@@ -387,14 +407,15 @@ def delete_agent_connection_from_vault(
         return False
 
     try:
-        # Attempt deletion on the URL-encoded path only
+        # Attempt deletion on the normalized underscore path first
         path = format_secret_key(name, user_id, agent_id, is_common)
         secret = client.get_secret(path)
         deleted_any = False
         if secret:
-            encoded_name = quote(name, safe="")
-            if encoded_name in secret:
-                secret.pop(encoded_name, None)
+            # Remove sanitized key if present
+            sanitized = sanitize_key_field(name)
+            if sanitized in secret:
+                secret.pop(sanitized, None)
             if secret:
                 deleted_any = client.set_secret(path, secret)
             else:

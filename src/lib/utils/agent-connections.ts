@@ -1,5 +1,15 @@
 import { listAgentConnections, type AgentConnection } from '$lib/apis/agent-connections';
 
+// Normalize an agent identifier to underscore format used by the backend
+function normalizeAgentId(input?: string | null): string | null {
+    if (!input) return null;
+    // Take substring before first ':' if present
+    const base = input.includes(':') ? input.split(':', 1)[0] : input;
+    // Replace runs of non-alphanumeric with single underscore and trim
+    const normalized = base.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    return normalized.length ? normalized : 'default';
+}
+
 /**
  * Build vault keys header from agent connections
  * @param agentId - Optional agent ID to filter connections
@@ -7,7 +17,8 @@ import { listAgentConnections, type AgentConnection } from '$lib/apis/agent-conn
  */
 export async function buildVaultKeysHeader(agentId?: string): Promise<string | null> {
     try {
-        console.log('[VaultKeys] buildVaultKeysHeader() called with agentId:', agentId);
+        const normAgentId = normalizeAgentId(agentId ?? null);
+        console.log('[VaultKeys] buildVaultKeysHeader() called with agentId:', agentId, 'normalized:', normAgentId);
         const token = localStorage.token;
         if (!token) {
             console.log('[VaultKeys] No token found in localStorage; skipping vault keys header');
@@ -29,9 +40,9 @@ export async function buildVaultKeysHeader(agentId?: string): Promise<string | n
         // Filter connections based on agent ID with priority system
         const relevantConnections = connections.filter(conn => {
             // If agent ID is provided, prioritize agent-specific connections
-            if (agentId) {
+            if (normAgentId) {
                 // Include connections specifically for this agent
-                if (conn.agent_id === agentId) return true;
+                if (normalizeAgentId(conn.agent_id ?? null) === normAgentId) return true;
                 
                 // Include common connections
                 if (conn.is_common) return true;
@@ -60,8 +71,8 @@ export async function buildVaultKeysHeader(agentId?: string): Promise<string | n
         // Sort connections to prioritize agent-specific over common
         const sortedConnections = relevantConnections.sort((a, b) => {
             // Agent-specific connections first
-            if (agentId && a.agent_id === agentId && b.agent_id !== agentId) return -1;
-            if (agentId && b.agent_id === agentId && a.agent_id !== agentId) return 1;
+            if (normAgentId && normalizeAgentId(a.agent_id ?? null) === normAgentId && normalizeAgentId(b.agent_id ?? null) !== normAgentId) return -1;
+            if (normAgentId && normalizeAgentId(b.agent_id ?? null) === normAgentId && normalizeAgentId(a.agent_id ?? null) !== normAgentId) return 1;
             
             // Common connections next
             if (a.is_common && !b.is_common) return 1;
@@ -76,21 +87,22 @@ export async function buildVaultKeysHeader(agentId?: string): Promise<string | n
             sortedConnections.map((c) => ({ key_name: c.key_name, agent_id: c.agent_id, is_common: c.is_common }))
         );
 
-        // Build the header value in format: agentId_key1,COMMON_key2
+        // Build the header value in format: agent_name/key_name,COMMON/key_name
         const vaultKeys = sortedConnections.map(conn => {
             // Use COMMON prefix for common connections
             if (conn.is_common) {
-                return `COMMON_${conn.key_name}`;
+                return `COMMON/${conn.key_name}`;
             }
             
             // Use agent ID prefix for agent-specific connections
             if (conn.agent_id) {
-                return `${conn.agent_id}_${conn.key_name}`;
+                const pref = normalizeAgentId(conn.agent_id) ?? normAgentId ?? 'GENERAL';
+                return `${pref}/${conn.key_name}`;
             }
             
             // Fallback for legacy connections without agent_id
-            const prefix = agentId || 'GENERAL';
-            return `${prefix}_${conn.key_name}`;
+            const prefix = normAgentId || 'GENERAL';
+            return `${prefix}/${conn.key_name}`;
         });
 
         const headerVal = vaultKeys.join(',');
@@ -127,7 +139,7 @@ export function extractAgentIdFromModel(model: Record<string, unknown>): string 
         agentId
     );
 
-    if (typeof agentId === 'string') return agentId;
+    if (typeof agentId === 'string') return normalizeAgentId(agentId);
 
     // Fallback: try to extract from model ID if it follows a pattern
     // e.g., agent:gpt-4 -> agent ID would be "agent"
@@ -141,7 +153,7 @@ export function extractAgentIdFromModel(model: Record<string, unknown>): string 
                 '->',
                 derived
             );
-            return derived;
+            return normalizeAgentId(derived);
         }
     }
 
