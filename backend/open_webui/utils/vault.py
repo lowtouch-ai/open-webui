@@ -57,14 +57,19 @@ def sanitize_agent_name(agent_identifier: Optional[str]) -> str:
 
 
 def sanitize_key_field(key: str) -> str:
-    """Sanitize a secret field (key name) to avoid path separator issues.
+    """Sanitize a secret field (key name) to match our storage and filtering rules.
 
-    - Replace '/' and '\\' with '_'.
-    - Leave other characters as-is to preserve user-friendly names.
+    Rules:
+      - Drop anything after the first ':' (exclusive). E.g., 'webshop_hr:0.3' -> 'webshop_hr'.
+      - Replace '/' and '\\' with '_'.
+      - Leave other characters as-is to preserve readability.
     """
     if key is None:
         return key
-    return key.replace("/", "_").replace("\\", "_")
+    # Drop version suffix or trailing part after ':'
+    head = key.split(":", 1)[0]
+    # Replace path separators with underscore
+    return head.replace("/", "_").replace("\\", "_")
 
 
 class VaultClient:
