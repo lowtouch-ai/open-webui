@@ -33,10 +33,10 @@ $: if (is_common) {
   agent_id = '';
 }
 
-// Filter models to get unique agent IDs
+// Filter models to get unique agent IDs; ensure current connection's agent_id is included on edit
 $: availableAgentIds = [
-  ...new Set(
-    $models
+  ...new Set([
+    ...$models
       .map(model => {
         // Use the same logic as extractAgentIdFromModel
         const info = model.info as Record<string, unknown> | undefined;
@@ -60,8 +60,9 @@ $: availableAgentIds = [
 
         return null;
       })
-      .filter(id => id && id.length > 0)
-  )
+      .filter(id => id && id.length > 0),
+    ...(mode === 'edit' && connection?.agent_id ? [connection.agent_id] : [])
+  ])
 ].sort();
 
 // Initialize form values when connection changes (only once per connection)

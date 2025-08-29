@@ -217,7 +217,7 @@ async def list_all_agent_connections(user=Depends(get_admin_user)):
                     
                     if response and 'data' in response and 'keys' in response['data']:
                         # Get all user information once
-                        all_users = {user.id: user for user in Users.get_users().items}
+                        all_users = {u.id: u for u in Users.get_users()}
                         
                         for user_id in response['data']['keys']:
                             if user_id.endswith('/'):
