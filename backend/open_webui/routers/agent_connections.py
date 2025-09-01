@@ -50,7 +50,7 @@ def _is_requested_key(key_name: str, agent_scope: str, requested_items: Optional
         # Map "COMMON" header scope to stored path scope "common"
         header_scope = "common" if scope_part == "COMMON" else scope_part
         # Sanitize the key part to match stored field names
-        if header_scope == agent_scope and key_name == sanitize_key_field(key_part):
+        if header_scope == agent_scope.lower() and key_name == sanitize_key_field(key_part):
             return True
     return False
 
@@ -160,8 +160,8 @@ async def list_agent_connections(request: Request, user=Depends(get_verified_use
                         for agent_scope in response['data']['keys']:
                             # Remove trailing slash if any
                             agent_scope = agent_scope[:-1] if agent_scope.endswith('/') else agent_scope
-                            agent_scope_decoded = agent_scope
-                            # Read secret at users/{user_id}/{agent_scope} to get fields
+                            agent_scope_decoded = agent_scope.lower()
+                            # Read secret at users/{user_id}/{agent_scope} to get fields (use original casing from Vault)
                             secret_path = f"users/{vault_user_id}/{agent_scope}"
                             secret = vault_client.client.secrets.kv.v1.read_secret(
                                 path=secret_path,
@@ -176,8 +176,8 @@ async def list_agent_connections(request: Request, user=Depends(get_verified_use
                                         continue
                                     is_common = agent_scope_decoded == "common"
                                     agent_id = None if agent_scope_decoded in ["common", "default"] else agent_scope_decoded
-                                    # Use encoded scope for key_id to avoid slashes
-                                    key_id = f"{vault_user_id}_{decoded_key_name}_{agent_scope}"
+                                    # Use lowercase scope for key_id for consistency
+                                    key_id = f"{vault_user_id}_{decoded_key_name}_{agent_scope_decoded}"
                                     connections.append(AgentConnectionResponse(
                                         key_id=key_id,
                                         key_name=decoded_key_name,
@@ -236,7 +236,7 @@ async def list_all_agent_connections(user=Depends(get_admin_user)):
                                 if user_response and 'data' in user_response and 'keys' in user_response['data']:
                                     for agent_scope in user_response['data']['keys']:
                                         agent_scope = agent_scope[:-1] if agent_scope.endswith('/') else agent_scope
-                                        agent_scope_decoded = agent_scope
+                                        agent_scope_decoded = agent_scope.lower()
                                         secret_path = f"users/{user_id}/{agent_scope}"
                                         secret = vault_client.client.secrets.kv.v1.read_secret(
                                             path=secret_path,
@@ -248,8 +248,8 @@ async def list_all_agent_connections(user=Depends(get_admin_user)):
                                                 decoded_key_name = key_name
                                                 is_common = agent_scope_decoded == "common"
                                                 agent_id = None if agent_scope_decoded in ["common", "default"] else agent_scope_decoded
-                                                # Use encoded scope for key_id to avoid slashes
-                                                key_id = f"{user_id}_{decoded_key_name}_{agent_scope}"
+                                                # Use lowercase scope for key_id for consistency
+                                                key_id = f"{user_id}_{decoded_key_name}_{agent_scope_decoded}"
                                                 connections.append(AgentConnectionResponse(
                                                     key_id=key_id,
                                                     key_name=decoded_key_name,

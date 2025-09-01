@@ -290,13 +290,13 @@ def format_secret_key(name: str, user_id: str, agent_id: Optional[str] = None, i
         name: Secret field name (unused for path construction).
         user_id: Vault user id (can be a logical id from header).
         agent_id: Agent identifier (model string); will be sanitized.
-        is_common: If True, use "common" scope.
+        is_common: If True, use "COMMON" scope.
 
     Returns:
         str: Formatted secret base path (relative to mount point).
     """
     if is_common:
-        agent_name = "common"
+        agent_name = "COMMON"
     elif agent_id:
         agent_name = sanitize_agent_name(agent_id)
     else:
@@ -371,9 +371,10 @@ def get_agent_connection_from_vault(
         return None
 
     try:
-        # Primary: read from the normalized underscore path
+        # Read from the target (uppercase COMMON) path
         path = format_secret_key(name, user_id, agent_id, is_common)
         secret = client.get_secret(path)
+
         if secret:
             sanitized = sanitize_key_field(name)
             if sanitized in secret:
@@ -412,12 +413,11 @@ def delete_agent_connection_from_vault(
         return False
 
     try:
-        # Attempt deletion on the normalized underscore path first
+        # Attempt deletion on the target (uppercase COMMON) path
         path = format_secret_key(name, user_id, agent_id, is_common)
         secret = client.get_secret(path)
         deleted_any = False
         if secret:
-            # Remove sanitized key if present
             sanitized = sanitize_key_field(name)
             if sanitized in secret:
                 secret.pop(sanitized, None)
