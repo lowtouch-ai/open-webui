@@ -396,6 +396,7 @@ export const generateOpenAIChatCompletion = async (
 	const res = await fetch(`${url}/chat/completions`, {
 		method: 'POST',
 		headers,
+		credentials: 'include',
 		body: JSON.stringify(body)
 	})
 		.then(async (res) => {
@@ -403,7 +404,7 @@ export const generateOpenAIChatCompletion = async (
 			return res.json();
 		})
 		.catch((err) => {
-			error = `${err?.detail ?? err}`;
+			error = err?.detail ?? err;
 			return null;
 		});
 

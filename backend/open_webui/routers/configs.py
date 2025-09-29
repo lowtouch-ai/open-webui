@@ -1,5 +1,7 @@
+import logging
 from fastapi import APIRouter, Depends, Request, HTTPException
 from pydantic import BaseModel, ConfigDict
+import aiohttp
 
 from typing import Optional, List, Dict, Any
 
@@ -8,12 +10,30 @@ from open_webui.config import get_config, save_config
 from open_webui.config import BannerModel
 from open_webui.config import ENABLE_VAULT_INTEGRATION, VAULT_URL, VAULT_TOKEN, VAULT_MOUNT_PATH, VAULT_VERSION, VAULT_TIMEOUT, VAULT_VERIFY_SSL
 
-from open_webui.utils.tools import get_tool_server_data, get_tool_servers_data
-from open_webui.utils.vault import store_agent_connection_in_vault, get_agent_connection_from_vault, delete_agent_connection_from_vault
+from open_webui.utils.tools import (
+    get_tool_server_data,
+    get_tool_server_url,
+    set_tool_servers,
+)
+from open_webui.utils.mcp.client import MCPClient
+
+from open_webui.env import SRC_LOG_LEVELS
+
+from open_webui.utils.oauth import (
+    get_discovery_urls,
+    get_oauth_client_info_with_dynamic_client_registration,
+    encrypt_data,
+    decrypt_data,
+    OAuthClientInformationFull,
+)
+from mcp.shared.auth import OAuthMetadatafrom open_webui.utils.vault import store_agent_connection_in_vault, get_agent_connection_from_vault, delete_agent_connection_from_vault
 from loguru import logger
 
 
 router = APIRouter()
+
+log = logging.getLogger(__name__)
+log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 
 ############################
@@ -78,6 +98,43 @@ async def set_connections_config(
     }
 
 
+class OAuthClientRegistrationForm(BaseModel):
+    url: str
+    client_id: str
+    client_name: Optional[str] = None
+
+
+@router.post("/oauth/clients/register")
+async def register_oauth_client(
+    request: Request,
+    form_data: OAuthClientRegistrationForm,
+    type: Optional[str] = None,
+    user=Depends(get_admin_user),
+):
+    try:
+        oauth_client_id = form_data.client_id
+        if type:
+            oauth_client_id = f"{type}:{form_data.client_id}"
+
+        oauth_client_info = (
+            await get_oauth_client_info_with_dynamic_client_registration(
+                request, oauth_client_id, form_data.url
+            )
+        )
+        return {
+            "status": True,
+            "oauth_client_info": encrypt_data(
+                oauth_client_info.model_dump(mode="json")
+            ),
+        }
+    except Exception as e:
+        log.debug(f"Failed to register OAuth client: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to register OAuth client",
+        )
+
+
 ############################
 # ToolServers Config
 ############################
@@ -86,6 +143,7 @@ async def set_connections_config(
 class ToolServerConnection(BaseModel):
     url: str
     path: str
+    type: Optional[str] = "openapi"  # openapi, mcp
     auth_type: Optional[str]
     key: Optional[str]
     config: Optional[dict]
@@ -114,9 +172,27 @@ async def set_tool_servers_config(
         connection.model_dump() for connection in form_data.TOOL_SERVER_CONNECTIONS
     ]
 
-    request.app.state.TOOL_SERVERS = await get_tool_servers_data(
-        request.app.state.config.TOOL_SERVER_CONNECTIONS
-    )
+    await set_tool_servers(request)
+
+    for connection in request.app.state.config.TOOL_SERVER_CONNECTIONS:
+        server_type = connection.get("type", "openapi")
+        if server_type == "mcp":
+            server_id = connection.get("info", {}).get("id")
+            auth_type = connection.get("auth_type", "none")
+            if auth_type == "oauth_2.1" and server_id:
+                try:
+                    oauth_client_info = connection.get("info", {}).get(
+                        "oauth_client_info", ""
+                    )
+                    oauth_client_info = decrypt_data(oauth_client_info)
+
+                    await request.app.state.oauth_client_manager.add_client(
+                        f"{server_type}:{server_id}",
+                        OAuthClientInformationFull(**oauth_client_info),
+                    )
+                except Exception as e:
+                    log.debug(f"Failed to add OAuth client for MCP tool server: {e}")
+                    continue
 
     return {
         "TOOL_SERVER_CONNECTIONS": request.app.state.config.TOOL_SERVER_CONNECTIONS,
@@ -131,20 +207,239 @@ async def verify_tool_servers_config(
     Verify the connection to the tool server.
     """
     try:
+        if form_data.type == "mcp":
+            if form_data.auth_type == "oauth_2.1":
+                discovery_urls = get_discovery_urls(form_data.url)
+                for discovery_url in discovery_urls:
+                    log.debug(
+                        f"Trying to fetch OAuth 2.1 discovery document from {discovery_url}"
+                    )
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(
+                            discovery_urls[0]
+                        ) as oauth_server_metadata_response:
+                            if oauth_server_metadata_response.status == 200:
+                                try:
+                                    oauth_server_metadata = (
+                                        OAuthMetadata.model_validate(
+                                            await oauth_server_metadata_response.json()
+                                        )
+                                    )
+                                    return {
+                                        "status": True,
+                                        "oauth_server_metadata": oauth_server_metadata.model_dump(
+                                            mode="json"
+                                        ),
+                                    }
+                                except Exception as e:
+                                    log.info(
+                                        f"Failed to parse OAuth 2.1 discovery document: {e}"
+                                    )
+                                    raise HTTPException(
+                                        status_code=400,
+                                        detail=f"Failed to parse OAuth 2.1 discovery document from {discovery_urls[0]}",
+                                    )
 
-        token = None
-        if form_data.auth_type == "bearer":
-            token = form_data.key
-        elif form_data.auth_type == "session":
-            token = request.state.token.credentials
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Failed to fetch OAuth 2.1 discovery document from {discovery_urls}",
+                )
+            else:
+                try:
+                    client = MCPClient()
+                    headers = None
 
-        url = f"{form_data.url}/{form_data.path}"
-        return await get_tool_server_data(token, url)
+                    token = None
+                    if form_data.auth_type == "bearer":
+                        token = form_data.key
+                    elif form_data.auth_type == "session":
+                        token = request.state.token.credentials
+                    elif form_data.auth_type == "system_oauth":
+                        try:
+                            if request.cookies.get("oauth_session_id", None):
+                                token = await request.app.state.oauth_manager.get_oauth_token(
+                                    user.id,
+                                    request.cookies.get("oauth_session_id", None),
+                                )
+                        except Exception as e:
+                            pass
+
+                    if token:
+                        headers = {"Authorization": f"Bearer {token}"}
+
+                    await client.connect(form_data.url, headers=headers)
+                    specs = await client.list_tool_specs()
+                    return {
+                        "status": True,
+                        "specs": specs,
+                    }
+                except Exception as e:
+                    log.debug(f"Failed to create MCP client: {e}")
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Failed to create MCP client",
+                    )
+                finally:
+                    if client:
+                        await client.disconnect()
+        else:  # openapi
+            token = None
+            if form_data.auth_type == "bearer":
+                token = form_data.key
+            elif form_data.auth_type == "session":
+                token = request.state.token.credentials
+            elif form_data.auth_type == "system_oauth":
+                try:
+                    if request.cookies.get("oauth_session_id", None):
+                        token = await request.app.state.oauth_manager.get_oauth_token(
+                            user.id,
+                            request.cookies.get("oauth_session_id", None),
+                        )
+                except Exception as e:
+                    pass
+
+            url = get_tool_server_url(form_data.url, form_data.path)
+            return await get_tool_server_data(token, url)
+    except HTTPException as e:
+        raise e
     except Exception as e:
+        log.debug(f"Failed to connect to the tool server: {e}")
         raise HTTPException(
             status_code=400,
-            detail=f"Failed to connect to the tool server: {str(e)}",
+            detail=f"Failed to connect to the tool server {str(e)}",
         )
+
+
+############################
+# Agent Connections Config
+############################
+
+class AgentConnection(BaseModel):
+    name: str
+    value: str
+    agent_id: Optional[str] = None
+    is_common: bool = False
+    
+    model_config = ConfigDict(extra="allow")
+
+
+class AgentConnectionsConfigForm(BaseModel):
+    AGENT_CONNECTIONS: List[AgentConnection] = []
+
+
+@router.get("/agent_connections", response_model=AgentConnectionsConfigForm)
+async def get_agent_connections_config(request: Request, user=Depends(get_verified_user)):
+    # Admin users can see all connections
+    if user.role == "admin":
+        # Handle case where AGENT_CONNECTIONS might be a list instead of PersistentConfig
+        agent_connections = request.app.state.config.AGENT_CONNECTIONS
+        if hasattr(agent_connections, 'value'):
+            connections = agent_connections.value
+        else:
+            # If it's already a list, use it directly
+            connections = agent_connections if isinstance(agent_connections, list) else []
+        
+        # If Vault integration is enabled, fetch secrets from Vault
+        if ENABLE_VAULT_INTEGRATION.value:
+            updated_connections = []
+            for conn in connections:
+                # Try to get the value from Vault
+                vault_value = get_agent_connection_from_vault(
+                    name=conn.get("name"),
+                    user_id=user.id,
+                    is_common=conn.get("is_common", False),
+                    agent_id=conn.get("agent_id")
+                )
+                
+                # If found in Vault, use that value
+                if vault_value is not None:
+                    conn_copy = dict(conn)
+                    conn_copy["value"] = vault_value
+                    updated_connections.append(conn_copy)
+                else:
+                    updated_connections.append(conn)
+            
+            return {"AGENT_CONNECTIONS": updated_connections}
+        
+        return {"AGENT_CONNECTIONS": connections}
+    
+    # Regular users can only see common connections or ones associated with their agents
+    # Check if user has agents property
+    user_agents = getattr(user, 'agents', [])
+    
+    # Handle case where AGENT_CONNECTIONS might be a list instead of PersistentConfig
+    agent_connections = request.app.state.config.AGENT_CONNECTIONS
+    if hasattr(agent_connections, 'value'):
+        all_connections = agent_connections.value
+    else:
+        all_connections = agent_connections if isinstance(agent_connections, list) else []
+    
+    user_connections = [
+        conn for conn in all_connections
+        if conn.get("is_common", False) or (conn.get("agent_id") and conn.get("agent_id") in user_agents)
+    ]
+    
+    # If Vault integration is enabled, fetch secrets from Vault
+    if ENABLE_VAULT_INTEGRATION.value:
+        updated_connections = []
+        for conn in user_connections:
+            # Try to get the value from Vault
+            vault_value = get_agent_connection_from_vault(
+                name=conn.get("name"),
+                user_id=user.id,
+                is_common=conn.get("is_common", False),
+                agent_id=conn.get("agent_id")
+            )
+            
+            # If found in Vault, use that value
+            if vault_value is not None:
+                conn_copy = dict(conn)
+                conn_copy["value"] = vault_value
+                updated_connections.append(conn_copy)
+            else:
+                updated_connections.append(conn)
+        
+        return {"AGENT_CONNECTIONS": updated_connections}
+    
+    return {"AGENT_CONNECTIONS": user_connections}
+
+
+@router.post("/agent_connections", response_model=AgentConnectionsConfigForm)
+async def set_agent_connections_config(
+    request: Request,
+    form_data: AgentConnectionsConfigForm,
+    user=Depends(get_admin_user),
+):
+    connections = [connection.model_dump() for connection in form_data.AGENT_CONNECTIONS]
+    
+    # If Vault integration is enabled, store secrets in Vault
+    if ENABLE_VAULT_INTEGRATION.value:
+        for connection in connections:
+            # Store the secret in Vault
+            success = store_agent_connection_in_vault(connection, user.id)
+            
+            # If successfully stored in Vault, remove the value from the connection
+            # to avoid storing it in the database
+            if success:
+                # Keep a placeholder value to indicate it's stored in Vault
+                connection["value"] = "[STORED_IN_VAULT]"
+                logger.info(f"Stored agent connection {connection.get('name')} for user {user.id} in Vault")
+            else:
+                logger.error(f"Failed to store agent connection {connection.get('name')} for user {user.id} in Vault")
+    
+    # Update the PersistentConfig value (or set directly if it's a list)
+    agent_connections = request.app.state.config.AGENT_CONNECTIONS
+    if hasattr(agent_connections, 'value'):
+        agent_connections.value = connections
+    else:
+        # If it's not a PersistentConfig, set it directly
+        request.app.state.config.AGENT_CONNECTIONS = connections
+    
+    # Return the current value
+    if hasattr(request.app.state.config.AGENT_CONNECTIONS, 'value'):
+        return {"AGENT_CONNECTIONS": request.app.state.config.AGENT_CONNECTIONS.value}
+    else:
+        return {"AGENT_CONNECTIONS": request.app.state.config.AGENT_CONNECTIONS}
 
 
 ############################
