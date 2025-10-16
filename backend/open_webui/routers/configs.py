@@ -26,7 +26,8 @@ from open_webui.utils.oauth import (
     decrypt_data,
     OAuthClientInformationFull,
 )
-from mcp.shared.auth import OAuthMetadatafrom open_webui.utils.vault import store_agent_connection_in_vault, get_agent_connection_from_vault, delete_agent_connection_from_vault
+from mcp.shared.auth import OAuthMetadata
+from open_webui.utils.vault import store_agent_connection_in_vault, get_agent_connection_from_vault, delete_agent_connection_from_vault
 from loguru import logger
 
 
