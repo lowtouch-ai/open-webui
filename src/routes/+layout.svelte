@@ -47,6 +47,7 @@
 	import NotificationToast from '$lib/components/NotificationToast.svelte';
 	import AppSidebar from '$lib/components/app/AppSidebar.svelte';
 	import { chatCompletion } from '$lib/apis/openai';
+	import { installClientTimeHeadersFetchPatch } from '$lib/utils/installClientTimeHeadersFetchPatch';
 
 	setContext('i18n', i18n);
 
@@ -406,6 +407,9 @@
 		if (typeof window !== 'undefined' && window.applyTheme) {
 			window.applyTheme();
 		}
+
+		// Attach client time/timezone headers to WebUI API requests
+		installClientTimeHeadersFetchPatch();
 
 		if (window?.electronAPI) {
 			const info = await window.electronAPI.send({
