@@ -19,17 +19,29 @@
 	let durationSeconds = 0;
 	let durationCounter = null;
 
+	let isPaused = false;
+
+	$: isWebSpeechEngine = ($config?.audio?.stt?.engine ?? '') === 'web' || (($settings?.audio?.stt?.engine ?? '') === 'web');
+
 	let transcription = '';
 
 	const startDurationCounter = () => {
+		if (durationCounter) {
+			return;
+		}
 		durationCounter = setInterval(() => {
 			durationSeconds++;
 		}, 1000);
 	};
 
-	const stopDurationCounter = () => {
-		clearInterval(durationCounter);
-		durationSeconds = 0;
+	const stopDurationCounter = (reset = true) => {
+		if (durationCounter) {
+			clearInterval(durationCounter);
+			durationCounter = null;
+		}
+		if (reset) {
+			durationSeconds = 0;
+		}
 	};
 
 	$: if (recording) {
@@ -94,7 +106,7 @@
 			const processFrame = () => {
 				if (!recording || loading) return;
 
-				if (recording && !loading) {
+				if (!isPaused) {
 					analyser.getByteTimeDomainData(timeDomainData);
 					analyser.getByteFrequencyData(domainData);
 
@@ -159,6 +171,8 @@
 	};
 
 	const startRecording = async () => {
+		isPaused = false;
+		stopDurationCounter();
 		startDurationCounter();
 
 		stream = await navigator.mediaDevices.getUserMedia({
@@ -253,7 +267,7 @@
 	};
 
 	const stopRecording = async () => {
-		if (recording && mediaRecorder) {
+		if (recording && mediaRecorder && mediaRecorder.state !== 'inactive') {
 			await mediaRecorder.stop();
 		}
 
@@ -261,6 +275,7 @@
 			speechRecognition.stop();
 		}
 
+		isPaused = false;
 		stopDurationCounter();
 		audioChunks = [];
 
@@ -276,10 +291,12 @@
 		loading = true;
 		confirmed = true;
 
-		if (recording && mediaRecorder) {
+		if (recording && mediaRecorder && mediaRecorder.state !== 'inactive') {
 			await mediaRecorder.stop();
 		}
-		clearInterval(durationCounter);
+
+		isPaused = false;
+		stopDurationCounter();
 
 		if (stream) {
 			const tracks = stream.getTracks();
@@ -287,6 +304,34 @@
 		}
 
 		stream = null;
+	};
+
+	const pauseRecording = () => {
+		if (mediaRecorder && mediaRecorder.state === 'recording') {
+			mediaRecorder.pause();
+			stopDurationCounter(false);
+			isPaused = true;
+		}
+	};
+
+	const resumeRecording = () => {
+		if (mediaRecorder && mediaRecorder.state === 'paused') {
+			mediaRecorder.resume();
+			isPaused = false;
+			startDurationCounter();
+		}
+	};
+
+	const togglePause = () => {
+		if (!mediaRecorder || loading || isWebSpeechEngine) {
+			return;
+		}
+
+		if (isPaused) {
+			resumeRecording();
+		} else {
+			pauseRecording();
+		}
 	};
 
 	let resizeObserver;
@@ -389,7 +434,42 @@
 			</div>
 		</div>
 
-		<div class="flex items-center">
+		<div class="flex items-center gap-1.5">
+			{#if !isWebSpeechEngine}
+				<button
+					type="button"
+					class="p-1.5 rounded-full {isPaused
+						? 'bg-indigo-400/30 text-indigo-600 dark:bg-indigo-400/20 dark:text-indigo-200'
+						: 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-100'}"
+					class:cursor-not-allowed={loading}
+					disabled={loading}
+					aria-label={isPaused ? $i18n.t('Resume recording') : $i18n.t('Pause recording')}
+					on:click={() => {
+						togglePause();
+					}}
+				>
+					{#if isPaused}
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 24 24"
+							fill="currentColor"
+							class="size-4"
+						>
+							<path d="M5.25 5.25a.75.75 0 01.75-.75h1.5a.75.75 0 01.75.75v13.5a.75.75 0 01-.75.75H6a.75.75 0 01-.75-.75V5.25zM15.75 5.25a.75.75 0 01.75-.75h1.5a.75.75 0 01.75.75v13.5a.75.75 0 01-.75.75h-1.5a.75.75 0 01-.75-.75V5.25z" />
+						</svg>
+					{:else}
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 24 24"
+							fill="currentColor"
+							class="size-4"
+						>
+							<path d="M5.25 4.5a.75.75 0 01.75-.75h1.5A.75.75 0 019 4.5v15a.75.75 0 01-1.5 0v-15H6a.75.75 0 01-.75-.75zM13.5 4.125a.75.75 0 011.106-.663l7.5 4.125a.75.75 0 010 1.326l-7.5 4.125A.75.75 0 0113.5 12V4.125z" />
+						</svg>
+					{/if}
+				</button>
+			{/if}
+
 			{#if loading}
 				<div class=" text-gray-500 rounded-full cursor-not-allowed">
 					<svg
