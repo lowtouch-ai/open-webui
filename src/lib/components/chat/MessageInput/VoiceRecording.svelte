@@ -438,9 +438,9 @@
 			{#if !isWebSpeechEngine}
 				<button
 					type="button"
-					class="p-1.5 rounded-full {isPaused
-						? 'bg-indigo-400/30 text-indigo-600 dark:bg-indigo-400/20 dark:text-indigo-200'
-						: 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-100'}"
+					class="inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60 disabled:opacity-50 disabled:cursor-not-allowed {isPaused
+						? 'bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-600 dark:text-indigo-200'
+						: 'bg-gray-200 hover:bg-gray-300 text-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-100'}"
 					class:cursor-not-allowed={loading}
 					disabled={loading}
 					aria-label={isPaused ? $i18n.t('Resume recording') : $i18n.t('Pause recording')}
@@ -453,18 +453,18 @@
 							xmlns="http://www.w3.org/2000/svg"
 							viewBox="0 0 24 24"
 							fill="currentColor"
-							class="size-4"
+							class="h-4 w-4"
 						>
-							<path d="M5.25 5.25a.75.75 0 01.75-.75h1.5a.75.75 0 01.75.75v13.5a.75.75 0 01-.75.75H6a.75.75 0 01-.75-.75V5.25zM15.75 5.25a.75.75 0 01.75-.75h1.5a.75.75 0 01.75.75v13.5a.75.75 0 01-.75.75h-1.5a.75.75 0 01-.75-.75V5.25z" />
+							<path d="M5.25 4.5v15l13.5-7.5-13.5-7.5z" />
 						</svg>
 					{:else}
 						<svg
 							xmlns="http://www.w3.org/2000/svg"
 							viewBox="0 0 24 24"
 							fill="currentColor"
-							class="size-4"
+							class="h-4 w-4"
 						>
-							<path d="M5.25 4.5a.75.75 0 01.75-.75h1.5A.75.75 0 019 4.5v15a.75.75 0 01-1.5 0v-15H6a.75.75 0 01-.75-.75zM13.5 4.125a.75.75 0 011.106-.663l7.5 4.125a.75.75 0 010 1.326l-7.5 4.125A.75.75 0 0113.5 12V4.125z" />
+							<path d="M6.75 5.25h2.5c.414 0 .75.336.75.75v12a.75.75 0 01-.75.75h-2.5a.75.75 0 01-.75-.75v-12c0-.414.336-.75.75-.75zM14.75 5.25h2.5c.414 0 .75.336.75.75v12a.75.75 0 01-.75.75h-2.5a.75.75 0 01-.75-.75v-12c0-.414.336-.75.75-.75z" />
 						</svg>
 					{/if}
 				</button>
