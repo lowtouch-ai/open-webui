@@ -678,11 +678,19 @@ async def generate_chat_completion(
             trust_env=True, timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT)
         )
 
+        # Collect only x-ltai-* headers from the incoming request to forward upstream
+        forwarded_headers = {
+            k: v for k, v in request.headers.items() if k.lower().startswith("x-ltai-")
+        }
+
+        log.info(f"[LTAI] forwarding ltai headers (keys): {list(forwarded_headers.keys())}")
+
         r = await session.request(
             method="POST",
             url=f"{url}/chat/completions",
             data=payload,
             headers={
+                **forwarded_headers,
                 "Authorization": f"Bearer {key}",
                 "Content-Type": "application/json",
                 **(
