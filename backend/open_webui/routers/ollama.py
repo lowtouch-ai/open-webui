@@ -116,6 +116,7 @@ async def send_post_request(
     key: Optional[str] = None,
     content_type: Optional[str] = None,
     user: UserModel = None,
+    extra_headers: Optional[dict] = None,
 ):
 
     r = None
@@ -140,6 +141,7 @@ async def send_post_request(
                     if ENABLE_FORWARD_USER_INFO_HEADERS and user
                     else {}
                 ),
+                **(extra_headers or {}),
             },
         )
         r.raise_for_status()
@@ -1165,6 +1167,14 @@ async def generate_chat_completion(
     if prefix_id:
         payload["model"] = payload["model"].replace(f"{prefix_id}.", "")
 
+    # Collect only x-ltai-* headers from the incoming request to forward upstream
+    forwarded_headers = {
+        k: v for k, v in request.headers.items() if k.lower().startswith("x-ltai-")
+    }
+
+    # Log keys of forwarded headers for visibility
+    log.info(f"[LTAI] forwarding ltai headers to ollama (keys): {list(forwarded_headers.keys())}")
+
     return await send_post_request(
         url=f"{url}/api/chat",
         payload=json.dumps(payload),
@@ -1172,6 +1182,7 @@ async def generate_chat_completion(
         key=get_api_key(url_idx, url, request.app.state.config.OLLAMA_API_CONFIGS),
         content_type="application/x-ndjson",
         user=user,
+        extra_headers=forwarded_headers,
     )
 
 
