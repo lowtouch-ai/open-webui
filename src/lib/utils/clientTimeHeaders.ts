@@ -10,9 +10,9 @@ export const getClientTimeHeaders = (): Record<string, string> => {
   const offsetStr = `${sign}${hh}:${mm}`;
 
   return {
-    'X-Client-Local-Time': now.toISOString(),
-    'X-Client-Timezone': tz,
-    'X-Client-UTC-Offset': offsetStr
+    'x-ltai-client-local-time': now.toISOString(),
+    'x-ltai-client-timezone': tz,
+    'x-ltai-client-utc-offset': offsetStr
   };
 };
 
