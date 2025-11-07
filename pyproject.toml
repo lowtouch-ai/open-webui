@@ -41,6 +41,7 @@ dependencies = [
     "RestrictedPython==8.0",
 
     "loguru==0.7.2",
+    "hvac==2.2.0",
     "asgiref==3.8.1",
 
     "openai",

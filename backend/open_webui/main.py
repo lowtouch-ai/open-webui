@@ -76,6 +76,7 @@ from open_webui.routers import (
     tools,
     users,
     utils,
+    agent_connections,
 )
 
 from open_webui.routers.retrieval import (
@@ -863,6 +864,25 @@ app.add_middleware(
 )
 
 
+class StaticCORSMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        
+        # Add CORS headers to static file responses
+        if request.url.path.startswith("/static/") or request.url.path.startswith("/cache/"):
+            origin = request.headers.get("origin")
+            if origin and (origin in CORS_ALLOW_ORIGIN or "*" in CORS_ALLOW_ORIGIN):
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+                response.headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS"
+                response.headers["Access-Control-Allow-Headers"] = "Origin, Accept, Authorization, Content-Type, X-Requested-With"
+        
+        return response
+
+
+app.add_middleware(StaticCORSMiddleware)
+
+
 app.mount("/ws", socket_app)
 
 
@@ -878,6 +898,7 @@ app.include_router(audio.router, prefix="/api/v1/audio", tags=["audio"])
 app.include_router(retrieval.router, prefix="/api/v1/retrieval", tags=["retrieval"])
 
 app.include_router(configs.router, prefix="/api/v1/configs", tags=["configs"])
+app.include_router(agent_connections.router, prefix="/api/v1/agent_connections", tags=["agent_connections"])
 
 app.include_router(auths.router, prefix="/api/v1/auths", tags=["auths"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
@@ -1014,6 +1035,15 @@ async def chat_completion(
             request.state.direct = True
             request.state.model = model
 
+        # Extract LTAI headers (only headers starting with x-ltai-)
+        vault_user_id = request.headers.get('x-ltai-vault-user')
+        vault_keys = request.headers.get('x-ltai-vault-keys')
+        ltai_headers = {
+            k: v for k, v in request.headers.items() if k.lower().startswith('x-ltai-')
+        }
+
+        log.info(f"[LTAI] incoming ltai headers (keys): {list(ltai_headers.keys())}")
+
         metadata = {
             "user_id": user.id,
             "chat_id": form_data.pop("chat_id", None),
@@ -1025,6 +1055,9 @@ async def chat_completion(
             "variables": form_data.get("variables", None),
             "model": model,
             "direct": model_item.get("direct", False),
+            "vault_user_id": vault_user_id,
+            "vault_keys": vault_keys,
+            "ltai_headers": ltai_headers,
             **(
                 {"function_calling": "native"}
                 if form_data.get("params", {}).get("function_calling") == "native"

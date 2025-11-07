@@ -893,6 +893,7 @@
 						}}
 					>
 						<button
+							data-cy="user-menu"
 							class=" flex items-center rounded-xl py-2.5 px-2.5 w-full hover:bg-gray-100 dark:hover:bg-gray-900 transition"
 							on:click={() => {
 								showDropdown = !showDropdown;

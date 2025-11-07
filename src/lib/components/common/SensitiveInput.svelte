@@ -19,6 +19,7 @@
 		required={required && !readOnly}
 		disabled={readOnly}
 		autocomplete="off"
+		{...$$restProps}
 		type="text"
 	/>
 	<button

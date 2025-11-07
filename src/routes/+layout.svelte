@@ -25,7 +25,8 @@
 		temporaryChatEnabled,
 		isLastActiveTab,
 		isApp,
-		appInfo
+		appInfo,
+		models
 	} from '$lib/stores';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
@@ -46,6 +47,7 @@
 	import NotificationToast from '$lib/components/NotificationToast.svelte';
 	import AppSidebar from '$lib/components/app/AppSidebar.svelte';
 	import { chatCompletion } from '$lib/apis/openai';
+	import { installClientTimeHeadersFetchPatch } from '$lib/utils/installClientTimeHeadersFetchPatch';
 
 	setContext('i18n', i18n);
 
@@ -276,10 +278,16 @@
 								form_data['model'] = form_data['model'].replace(`${prefixId}.`, ``);
 							}
 
+							// Extract agent ID from model for vault keys
+							const { extractAgentIdFromModel } = await import('$lib/utils/agent-connections');
+							const model = $models.find(m => m.id === form_data.model);
+							const agentId = extractAgentIdFromModel(model);
+
 							const [res, controller] = await chatCompletion(
 								OPENAI_API_KEY,
 								form_data,
-								OPENAI_API_URL
+								OPENAI_API_URL,
+								agentId
 							);
 
 							if (res) {
@@ -399,6 +407,9 @@
 		if (typeof window !== 'undefined' && window.applyTheme) {
 			window.applyTheme();
 		}
+
+		// Attach client time/timezone headers to WebUI API requests
+		installClientTimeHeadersFetchPatch();
 
 		if (window?.electronAPI) {
 			const info = await window.electronAPI.send({

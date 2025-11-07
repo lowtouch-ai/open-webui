@@ -116,12 +116,25 @@ class UsersTable:
                     "created_at": int(time.time()),
                     "updated_at": int(time.time()),
                     "oauth_sub": oauth_sub,
+                    "settings":{
+                            "version": 0,
+                            "ui": {
+                                "audio": {
+                                    "stt": {
+                                        "engine": "web"
+                                    },
+                                }
+                            }
+                    }
                 }
             )
             result = User(**user.model_dump())
             db.add(result)
             db.commit()
             db.refresh(result)
+            #log result
+            print("User inserted:", result)
+
             if result:
                 return user
             else:
@@ -275,6 +288,8 @@ class UsersTable:
         try:
             with get_db() as db:
                 user_settings = db.query(User).filter_by(id=id).first().settings
+
+                print("User settings:", user_settings)
 
                 if user_settings is None:
                     user_settings = {}
