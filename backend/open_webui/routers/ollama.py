@@ -1172,6 +1172,66 @@ async def generate_chat_completion(
         k: v for k, v in request.headers.items() if k.lower().startswith("x-ltai-")
     }
 
+    # Add file URLs from the current chat payload into an x-ltai-file-urls header
+    try:
+        file_items = None
+        if isinstance(payload, dict):
+            file_items = payload.get("files")
+        if (not file_items) and isinstance(metadata, dict):
+            file_items = metadata.get("files")
+
+        if isinstance(file_items, list):
+            urls = [it.get("url") for it in file_items if isinstance(it, dict) and it.get("url")]
+            if urls:
+                forwarded_headers["x-ltai-file-urls"] = ",".join(urls)
+                try:
+                    log.info(f"[LTAI] file urls count: {len(urls)}")
+                except Exception:
+                    pass
+    except Exception:
+        # best-effort header enrichment; ignore failures
+        pass
+
+    # Add image references from messages
+    try:
+        image_http_urls = []
+        data_url_count = 0
+        msgs = None
+        if isinstance(payload, dict):
+            msgs = payload.get("messages")
+        if not msgs and isinstance(metadata, dict):
+            msgs = metadata.get("messages")
+
+        if isinstance(msgs, list):
+            for m in msgs:
+                content = m.get("content") if isinstance(m, dict) else None
+                if isinstance(content, list):
+                    for part in content:
+                        if (
+                            isinstance(part, dict)
+                            and part.get("type") == "image_url"
+                            and isinstance(part.get("image_url"), dict)
+                        ):
+                            url = part["image_url"].get("url")
+                            if isinstance(url, str):
+                                if url.startswith("http://") or url.startswith("https://"):
+                                    image_http_urls.append(url)
+                                elif url.startswith("data:"):
+                                    data_url_count += 1
+        if image_http_urls:
+            forwarded_headers["x-ltai-image-urls"] = ",".join(image_http_urls)
+        if data_url_count:
+            forwarded_headers["x-ltai-image-data-count"] = str(data_url_count)
+        try:
+            log.info(
+                f"[LTAI] image http urls count: {len(image_http_urls)}, data url count: {data_url_count}"
+            )
+        except Exception:
+            pass
+    except Exception:
+        # ignore enrichment failures
+        pass
+
     # Log keys of forwarded headers for visibility
     log.info(f"[LTAI] forwarding ltai headers to ollama (keys): {list(forwarded_headers.keys())}")
 
