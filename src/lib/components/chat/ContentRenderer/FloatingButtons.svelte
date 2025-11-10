@@ -9,6 +9,7 @@
 
 	import { chatCompletion } from '$lib/apis/openai';
 
+	import { models } from '$lib/stores';
 	import ChatBubble from '$lib/components/icons/ChatBubble.svelte';
 	import LightBlub from '$lib/components/icons/LightBlub.svelte';
 	import Markdown from '../Messages/Markdown.svelte';
@@ -48,6 +49,9 @@
 		floatingInputValue = '';
 
 		responseContent = '';
+		// Extract agent ID from model for vault keys
+		const { extractAgentIdFromModel } = await import('$lib/utils/agent-connections');
+		const agentId = extractAgentIdFromModel($models.find(m => m.id === model));
 		const [res, controller] = await chatCompletion(localStorage.token, {
 			model: model,
 			messages: [
@@ -61,7 +65,7 @@
 				content: message.content
 			})),
 			stream: true // Enable streaming
-		});
+		}, undefined, agentId);
 
 		if (res && res.ok) {
 			const reader = res.body.getReader();
@@ -125,6 +129,9 @@
 		prompt = `${explainText}\n\n\`\`\`\n${selectedText}\n\`\`\``;
 
 		responseContent = '';
+		// Extract agent ID from model for vault keys
+		const { extractAgentIdFromModel } = await import('$lib/utils/agent-connections');
+		const agentId = extractAgentIdFromModel($models.find(m => m.id === model));
 		const [res, controller] = await chatCompletion(localStorage.token, {
 			model: model,
 			messages: [
@@ -138,7 +145,7 @@
 				content: message.content
 			})),
 			stream: true // Enable streaming
-		});
+		}, undefined, agentId);
 
 		if (res && res.ok) {
 			const reader = res.body.getReader();

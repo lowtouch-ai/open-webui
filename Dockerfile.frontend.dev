@@ -1,0 +1,22 @@
+FROM node:18-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy package files for dependency installation
+COPY package.json package-lock.json ./
+
+# Install Node.js dependencies
+RUN npm ci
+
+# We'll mount the source code as volumes in docker-compose
+# so we don't need to copy it here
+
+EXPOSE 5173
+
+# Command will be overridden in docker-compose.dev.yaml
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
