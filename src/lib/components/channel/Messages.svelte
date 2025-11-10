@@ -23,10 +23,12 @@
 	export let id = null;
 	export let channel = null;
 	export let messages = [];
+	export let replyToMessage = null;
 	export let top = false;
 	export let thread = false;
 
 	export let onLoad: Function = () => {};
+	export let onReply: Function = () => {};
 	export let onThread: Function = () => {};
 
 	let messagesLoading = false;
@@ -51,7 +53,7 @@
 		{#if !top}
 			<Loader
 				on:visible={(e) => {
-					console.log('visible');
+					console.info('visible');
 					if (!messagesLoading) {
 						loadMoreMessages();
 					}
@@ -59,29 +61,28 @@
 			>
 				<div class="w-full flex justify-center py-1 text-xs animate-pulse items-center gap-2">
 					<Spinner className=" size-4" />
-					<div class=" ">Loading...</div>
+					<div class=" ">{$i18n.t('Loading...')}</div>
 				</div>
 			</Loader>
 		{:else if !thread}
-			<div
-				class="px-5
-			
-			{($settings?.widescreenMode ?? null) ? 'max-w-full' : 'max-w-5xl'} mx-auto"
-			>
+			<div class="px-5 max-w-full mx-auto">
 				{#if channel}
 					<div class="flex flex-col gap-1.5 pb-5 pt-10">
 						<div class="text-2xl font-medium capitalize">{channel.name}</div>
 
 						<div class=" text-gray-500">
-							This channel was created on {dayjs(channel.created_at / 1000000).format(
-								'MMMM D, YYYY'
-							)}. This is the very beginning of the {channel.name}
-							channel.
+							{$i18n.t(
+								'This channel was created on {{createdAt}}. This is the very beginning of the {{channelName}} channel.',
+								{
+									createdAt: dayjs(channel.created_at / 1000000).format('MMMM D, YYYY'),
+									channelName: channel.name
+								}
+							)}
 						</div>
 					</div>
 				{:else}
 					<div class="flex justify-center text-xs items-center gap-2 py-5">
-						<div class=" ">Start of the channel</div>
+						<div class=" ">{$i18n.t('Start of the channel')}</div>
 					</div>
 				{/if}
 
@@ -95,8 +96,12 @@
 			<Message
 				{message}
 				{thread}
+				replyToMessage={replyToMessage?.id === message.id}
+				disabled={!channel?.write_access}
 				showUserProfile={messageIdx === 0 ||
-					messageList.at(messageIdx - 1)?.user_id !== message.user_id}
+					messageList.at(messageIdx - 1)?.user_id !== message.user_id ||
+					messageList.at(messageIdx - 1)?.meta?.model_id !== message?.meta?.model_id ||
+					message?.reply_to_message}
 				onDelete={() => {
 					messages = messages.filter((m) => m.id !== message.id);
 
@@ -122,6 +127,9 @@
 						return null;
 					});
 				}}
+				onReply={(message) => {
+					onReply(message);
+				}}
 				onThread={(id) => {
 					onThread(id);
 				}}
@@ -129,7 +137,7 @@
 					if (
 						(message?.reactions ?? [])
 							.find((reaction) => reaction.name === name)
-							?.user_ids?.includes($user.id) ??
+							?.user_ids?.includes($user?.id) ??
 						false
 					) {
 						messages = messages.map((m) => {
@@ -137,7 +145,7 @@
 								const reaction = m.reactions.find((reaction) => reaction.name === name);
 
 								if (reaction) {
-									reaction.user_ids = reaction.user_ids.filter((id) => id !== $user.id);
+									reaction.user_ids = reaction.user_ids.filter((id) => id !== $user?.id);
 									reaction.count = reaction.user_ids.length;
 
 									if (reaction.count === 0) {
@@ -164,12 +172,12 @@
 									const reaction = m.reactions.find((reaction) => reaction.name === name);
 
 									if (reaction) {
-										reaction.user_ids.push($user.id);
+										reaction.user_ids.push($user?.id);
 										reaction.count = reaction.user_ids.length;
 									} else {
 										m.reactions.push({
 											name: name,
-											user_ids: [$user.id],
+											user_ids: [$user?.id],
 											count: 1
 										});
 									}

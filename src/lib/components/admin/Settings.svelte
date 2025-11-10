@@ -1,5 +1,7 @@
 <script>
 	import { getContext, tick, onMount } from 'svelte';
+	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 
 	import { config } from '$lib/stores';
@@ -14,6 +16,7 @@
 	import Models from './Settings/Models.svelte';
 	import Connections from './Settings/Connections.svelte';
 	import AgentConnections from './Settings/AgentConnections.svelte';
+	import AgentConnections from './Settings/AgentConnections.svelte';
 	import Documents from './Settings/Documents.svelte';
 	import WebSearch from './Settings/WebSearch.svelte';
 
@@ -21,10 +24,47 @@
 	import DocumentChartBar from '../icons/DocumentChartBar.svelte';
 	import Evaluations from './Settings/Evaluations.svelte';
 	import CodeExecution from './Settings/CodeExecution.svelte';
+	import Tools from './Settings/Tools.svelte';
 
 	const i18n = getContext('i18n');
 
 	let selectedTab = 'general';
+
+	// Get current tab from URL pathname, default to 'general'
+	$: {
+		const pathParts = $page.url.pathname.split('/');
+		const tabFromPath = pathParts[pathParts.length - 1];
+		selectedTab = [
+			'general',
+			'connections',
+			'agent-connections',
+			'models',
+			'evaluations',
+			'tools',
+			'documents',
+			'web',
+			'code-execution',
+			'interface',
+			'audio',
+			'images',
+			'pipelines',
+			'db'
+		].includes(tabFromPath)
+			? tabFromPath
+			: 'general';
+	}
+
+	$: if (selectedTab) {
+		// scroll to selectedTab
+		scrollToTab(selectedTab);
+	}
+
+	const scrollToTab = (tabId) => {
+		const tabElement = document.getElementById(tabId);
+		if (tabElement) {
+			tabElement.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'start' });
+		}
+	};
 
 	onMount(() => {
 		const containerElement = document.getElementById('admin-settings-tabs-container');
@@ -37,6 +77,9 @@
 				}
 			});
 		}
+
+		// Scroll to the selected tab on mount
+		scrollToTab(selectedTab);
 	});
 </script>
 
@@ -46,12 +89,13 @@
 		class="tabs flex flex-row overflow-x-auto gap-2.5 max-w-full lg:gap-1 lg:flex-col lg:flex-none lg:w-48 dark:text-gray-200 text-sm font-medium scrollbar-none"
 	>
 		<button
-			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 lg:flex-none flex text-left transition {selectedTab ===
+			id="general"
+			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 lg:flex-none flex text-right transition {selectedTab ===
 			'general'
 				? ''
 				: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
 			on:click={() => {
-				selectedTab = 'general';
+				goto('/admin/settings/general');
 			}}
 		>
 			<div class=" self-center mr-2">
@@ -72,12 +116,13 @@
 		</button>
 
 		<button
-			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 lg:flex-none flex text-left transition {selectedTab ===
+			id="connections"
+			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
 			'connections'
 				? ''
 				: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
 			on:click={() => {
-				selectedTab = 'connections';
+				goto('/admin/settings/connections');
 			}}
 		>
 			<div class=" self-center mr-2">
@@ -96,13 +141,13 @@
 		</button>
 
 		<button
-			data-cy="agent-connections-tab"
-			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 lg:flex-none flex text-left transition {selectedTab ===
+			id="agent-connections"
+			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
 			'agent-connections'
 				? ''
 				: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
 			on:click={() => {
-				selectedTab = 'agent-connections';
+				goto('/admin/settings/agent-connections');
 			}}
 		>
 			<div class=" self-center mr-2">
@@ -112,20 +157,19 @@
 					fill="currentColor"
 					class="w-4 h-4"
 				>
-					<path d="M2.5 3A1.5 1.5 0 0 0 1 4.5v.793c.026.009.051.02.076.032L7.674 8.51c.206.1.446.1.652 0l6.598-3.185A.755.755 0 0 1 15 5.293V4.5A1.5 1.5 0 0 0 13.5 3h-11Z" />
-					<path d="M15 6.954 8.978 9.86a2.25 2.25 0 0 1-1.956 0L1 6.954V11.5A1.5 1.5 0 0 0 2.5 13h11a1.5 1.5 0 0 0 1.5-1.5V6.954Z" />
+					<path d="M1 9.5A3.5 3.5 0 0 0 4.5 13H12a3 3 0 0 0 .917-5.857 2.503 2.503 0 0 0-3.198-3.019 3.5 3.5 0 0 0-6.628 2.171A3.5 3.5 0 0 0 1 9.5Z" />
 				</svg>
 			</div>
 			<div class=" self-center">{$i18n.t('Agent Connections')}</div>
 		</button>
 
 		<button
-			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 lg:flex-none flex text-left transition {selectedTab ===
+			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
 			'models'
 				? ''
 				: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
 			on:click={() => {
-				selectedTab = 'models';
+				goto('/admin/settings/models');
 			}}
 		>
 			<div class=" self-center mr-2">
@@ -146,12 +190,13 @@
 		</button>
 
 		<button
-			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 lg:flex-none flex text-left transition {selectedTab ===
+			id="evaluations"
+			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
 			'evaluations'
 				? ''
 				: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
 			on:click={() => {
-				selectedTab = 'evaluations';
+				goto('/admin/settings/evaluations');
 			}}
 		>
 			<div class=" self-center mr-2">
@@ -161,12 +206,40 @@
 		</button>
 
 		<button
-			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 lg:flex-none flex text-left transition {selectedTab ===
+			id="tools"
+			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
+			'tools'
+				? ''
+				: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+			on:click={() => {
+				goto('/admin/settings/tools');
+			}}
+		>
+			<div class=" self-center mr-2">
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					viewBox="0 0 24 24"
+					fill="currentColor"
+					class="size-4"
+				>
+					<path
+						fill-rule="evenodd"
+						d="M12 6.75a5.25 5.25 0 0 1 6.775-5.025.75.75 0 0 1 .313 1.248l-3.32 3.319c.063.475.276.934.641 1.299.365.365.824.578 1.3.64l3.318-3.319a.75.75 0 0 1 1.248.313 5.25 5.25 0 0 1-5.472 6.756c-1.018-.086-1.87.1-2.309.634L7.344 21.3A3.298 3.298 0 1 1 2.7 16.657l8.684-7.151c.533-.44.72-1.291.634-2.309A5.342 5.342 0 0 1 12 6.75ZM4.117 19.125a.75.75 0 0 1 .75-.75h.008a.75.75 0 0 1 .75.75v.008a.75.75 0 0 1-.75.75h-.008a.75.75 0 0 1-.75-.75v-.008Z"
+						clip-rule="evenodd"
+					/>
+				</svg>
+			</div>
+			<div class=" self-center">{$i18n.t('External Tools')}</div>
+		</button>
+
+		<button
+			id="documents"
+			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
 			'documents'
 				? ''
 				: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
 			on:click={() => {
-				selectedTab = 'documents';
+				goto('/admin/settings/documents');
 			}}
 		>
 			<div class=" self-center mr-2">
@@ -191,12 +264,13 @@
 		</button>
 
 		<button
-			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 lg:flex-none flex text-left transition {selectedTab ===
+			id="web"
+			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
 			'web'
 				? ''
 				: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
 			on:click={() => {
-				selectedTab = 'web';
+				goto('/admin/settings/web');
 			}}
 		>
 			<div class=" self-center mr-2">
@@ -215,12 +289,13 @@
 		</button>
 
 		<button
-			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 lg:flex-none flex text-left transition {selectedTab ===
+			id="code-execution"
+			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
 			'code-execution'
 				? ''
 				: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
 			on:click={() => {
-				selectedTab = 'code-execution';
+				goto('/admin/settings/code-execution');
 			}}
 		>
 			<div class=" self-center mr-2">
@@ -241,12 +316,13 @@
 		</button>
 
 		<button
-			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 lg:flex-none flex text-left transition {selectedTab ===
+			id="interface"
+			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
 			'interface'
 				? ''
 				: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
 			on:click={() => {
-				selectedTab = 'interface';
+				goto('/admin/settings/interface');
 			}}
 		>
 			<div class=" self-center mr-2">
@@ -267,12 +343,13 @@
 		</button>
 
 		<button
-			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 lg:flex-none flex text-left transition {selectedTab ===
+			id="audio"
+			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
 			'audio'
 				? ''
 				: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
 			on:click={() => {
-				selectedTab = 'audio';
+				goto('/admin/settings/audio');
 			}}
 		>
 			<div class=" self-center mr-2">
@@ -294,12 +371,13 @@
 		</button>
 
 		<button
-			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 lg:flex-none flex text-left transition {selectedTab ===
+			id="images"
+			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
 			'images'
 				? ''
 				: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
 			on:click={() => {
-				selectedTab = 'images';
+				goto('/admin/settings/images');
 			}}
 		>
 			<div class=" self-center mr-2">
@@ -320,12 +398,13 @@
 		</button>
 
 		<button
-			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 lg:flex-none flex text-left transition {selectedTab ===
+			id="pipelines"
+			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
 			'pipelines'
 				? ''
 				: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
 			on:click={() => {
-				selectedTab = 'pipelines';
+				goto('/admin/settings/pipelines');
 			}}
 		>
 			<div class=" self-center mr-2">
@@ -350,12 +429,13 @@
 		</button>
 
 		<button
-			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 lg:flex-none flex text-left transition {selectedTab ===
+			id="db"
+			class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
 			'db'
 				? ''
 				: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
 			on:click={() => {
-				selectedTab = 'db';
+				goto('/admin/settings/db');
 			}}
 		>
 			<div class=" self-center mr-2">
@@ -378,7 +458,9 @@
 		</button>
 	</div>
 
-	<div class="flex-1 mt-3 lg:mt-0 overflow-y-scroll pr-1 scrollbar-hidden">
+	<div
+		class="flex-1 mt-3 lg:mt-0 px-[16px] lg:pr-[16px] lg:pl-0 overflow-y-scroll scrollbar-hidden"
+	>
 		{#if selectedTab === 'general'}
 			<General
 				saveHandler={async () => {
@@ -400,10 +482,18 @@
 					toast.success($i18n.t('Settings saved successfully!'));
 				}}
 			/>
+		{:else if selectedTab === 'agent-connections'}
+			<AgentConnections
+				onSave={() => {
+					toast.success($i18n.t('Settings saved successfully!'));
+				}}
+			/>
 		{:else if selectedTab === 'models'}
 			<Models />
 		{:else if selectedTab === 'evaluations'}
 			<Evaluations />
+		{:else if selectedTab === 'tools'}
+			<Tools />
 		{:else if selectedTab === 'documents'}
 			<Documents
 				on:save={async () => {

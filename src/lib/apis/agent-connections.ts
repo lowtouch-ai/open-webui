@@ -25,6 +25,22 @@ export interface AgentConnectionUpdate {
 	is_common?: boolean;
 }
 
+export const getAgentConnectionsStatus = async (token: string) => {
+	const response = await fetch(`${WEBUI_BASE_URL}/api/v1/agent_connections/status`, {
+		method: 'GET',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		}
+	});
+
+	if (!response.ok) {
+		throw new Error(`Failed to get agent connections status: ${response.statusText}`);
+	}
+
+	return await response.json();
+};
+
 // REST API functions
 export const createAgentConnection = async (
 	token: string,
