@@ -116,6 +116,7 @@ async def send_post_request(
     key: Optional[str] = None,
     content_type: Optional[str] = None,
     user: UserModel = None,
+    vault_keys: Optional[str] = None,  # Add vault_keys parameter
     extra_headers: Optional[dict] = None,
 ):
 
@@ -131,12 +132,14 @@ async def send_post_request(
             headers={
                 "Content-Type": "application/json",
                 **({"Authorization": f"Bearer {key}"} if key else {}),
+                **({"x-ltai-vault-keys": vault_keys} if vault_keys else {}),  # Add vault_keys to headers
                 **(
                     {
                         "X-OpenWebUI-User-Name": user.name,
                         "X-OpenWebUI-User-Id": user.id,
                         "X-OpenWebUI-User-Email": user.email,
                         "X-OpenWebUI-User-Role": user.role,
+                        **({"x-ltai-vault-keys": vault_keys} if vault_keys else {}),  # Add vault_keys to headers
                     }
                     if ENABLE_FORWARD_USER_INFO_HEADERS and user
                     else {}
@@ -1166,6 +1169,8 @@ async def generate_chat_completion(
     prefix_id = api_config.get("prefix_id", None)
     if prefix_id:
         payload["model"] = payload["model"].replace(f"{prefix_id}.", "")
+    # Extract x-ltai-vault-keys from request headers
+    vault_keys = request.headers.get("x-ltai-vault-keys")
 
     # Collect only x-ltai-* headers from the incoming request to forward upstream
     forwarded_headers = {
@@ -1240,6 +1245,7 @@ async def generate_chat_completion(
         payload=json.dumps(payload),
         stream=form_data.stream,
         key=get_api_key(url_idx, url, request.app.state.config.OLLAMA_API_CONFIGS),
+        vault_keys=vault_keys,
         content_type="application/x-ndjson",
         user=user,
         extra_headers=forwarded_headers,
