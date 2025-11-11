@@ -69,7 +69,7 @@
 
 	const actionHandler = async (actionId) => {
 		if (!model) {
-			toast.error('Model not selected');
+			toast.error($i18n.t('Model not selected'));
 			return;
 		}
 
@@ -80,7 +80,7 @@
 
 		let selectedAction = actions.find((action) => action.id === actionId);
 		if (!selectedAction) {
-			toast.error('Action not found');
+			toast.error($i18n.t('Action not found'));
 			return;
 		}
 
@@ -105,7 +105,7 @@
 		// Remove all TOOL placeholders from the prompt
 		prompt = prompt.replace(toolIdPattern, '');
 
-		if (prompt.includes('{{INPUT_CONTENT}}') && !floatingInput) {
+		if (prompt.includes('{{INPUT_CONTENT}}') && floatingInput) {
 			prompt = prompt.replace('{{INPUT_CONTENT}}', floatingInputValue);
 			floatingInputValue = '';
 		}
@@ -271,7 +271,7 @@
 			// Process the stream in the background
 			await processStream();
 		} else {
-			toast.error('An error occurred while fetching the explanation');
+			toast.error($i18n.t('An error occurred while fetching the explanation'));
 		}
 	};
 

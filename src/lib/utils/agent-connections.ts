@@ -5,8 +5,11 @@ function normalizeAgentId(input?: string | null): string | null {
     if (!input) return null;
     // Take substring before first ':' if present
     const base = input.includes(':') ? input.split(':', 1)[0] : input;
-    // Replace runs of non-alphanumeric with single underscore and trim
-    const normalized = base.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    // Replace runs of non-alphanumeric with single underscore and trim (case-insensitive by lowercasing)
+    const normalized = base
+        .toLowerCase()
+        .replace(/[^A-Za-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
     return normalized.length ? normalized : 'default';
 }
 

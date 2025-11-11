@@ -17,6 +17,7 @@
 	import HtmlToken from './HTMLToken.svelte';
 	import TextToken from './MarkdownInlineTokens/TextToken.svelte';
 	import CodespanToken from './MarkdownInlineTokens/CodespanToken.svelte';
+	import MentionToken from './MarkdownInlineTokens/MentionToken.svelte';
 
 	export let id: string;
 	export let done = true;
@@ -109,6 +110,8 @@
 			frameborder="0"
 			onload="this.style.height=(this.contentWindow.document.body.scrollHeight+20)+'px';"
 		></iframe>
+	{:else if token.type === 'mention'}
+		<MentionToken {token} />
 	{:else if token.type === 'text'}
 		<TextToken {token} {done} />
 	{/if}

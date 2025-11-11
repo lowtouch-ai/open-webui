@@ -437,7 +437,7 @@ export const generateOpenAIChatCompletion = async (
 			return res.json();
 		})
 		.catch((err) => {
-			error = `${err?.detail ?? err}`;
+			error = err?.detail ?? err;
 			return null;
 		});
 

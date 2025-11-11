@@ -36,6 +36,7 @@
 		selectedTab = [
 			'general',
 			'connections',
+			'agent-connections',
 			'models',
 			'evaluations',
 			'tools',
@@ -228,7 +229,7 @@
 					/>
 				</svg>
 			</div>
-			<div class=" self-center">{$i18n.t('Tools')}</div>
+			<div class=" self-center">{$i18n.t('External Tools')}</div>
 		</button>
 
 		<button
@@ -457,7 +458,9 @@
 		</button>
 	</div>
 
-	<div class="flex-1 mt-3 lg:mt-0 overflow-y-scroll pr-1 scrollbar-hidden">
+	<div
+		class="flex-1 mt-3 lg:mt-0 px-[16px] lg:pr-[16px] lg:pl-0 overflow-y-scroll scrollbar-hidden"
+	>
 		{#if selectedTab === 'general'}
 			<General
 				saveHandler={async () => {

@@ -10,12 +10,15 @@ from pydantic import BaseModel
 
 
 from open_webui.models.auths import Auths
+from open_webui.models.oauth_sessions import OAuthSessions
+
 from open_webui.models.groups import Groups
 from open_webui.models.chats import Chats
 from open_webui.models.users import (
     UserModel,
     UserListResponse,
     UserInfoListResponse,
+    UserIdNameListResponse,
     UserRoleUpdateForm,
     Users,
     UserSettings,
@@ -98,6 +101,23 @@ async def get_all_users(
     return Users.get_users()
 
 
+@router.get("/search", response_model=UserIdNameListResponse)
+async def search_users(
+    query: Optional[str] = None,
+    user=Depends(get_verified_user),
+):
+    limit = PAGE_ITEM_COUNT
+
+    page = 1  # Always return the first page for search
+    skip = (page - 1) * limit
+
+    filter = {}
+    if query:
+        filter["query"] = query
+
+    return Users.get_users(filter=filter, skip=skip, limit=limit)
+
+
 ############################
 # User Groups
 ############################
@@ -137,6 +157,7 @@ class SharingPermissions(BaseModel):
     public_knowledge: bool = True
     public_prompts: bool = True
     public_tools: bool = True
+    public_notes: bool = True
 
 
 class ChatPermissions(BaseModel):
@@ -146,6 +167,10 @@ class ChatPermissions(BaseModel):
     params: bool = True
     file_upload: bool = True
     delete: bool = True
+    delete_message: bool = True
+    continue_response: bool = True
+    regenerate_response: bool = True
+    rate_response: bool = True
     edit: bool = True
     share: bool = True
     export: bool = True
@@ -336,6 +361,18 @@ async def get_user_by_id(user_id: str, user=Depends(get_verified_user)):
         )
 
 
+@router.get("/{user_id}/oauth/sessions", response_model=Optional[dict])
+async def get_user_oauth_sessions_by_id(user_id: str, user=Depends(get_admin_user)):
+    sessions = OAuthSessions.get_sessions_by_user_id(user_id)
+    if sessions and len(sessions) > 0:
+        return sessions
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.USER_NOT_FOUND,
+        )
+
+
 ############################
 # GetUserProfileImageById
 ############################
@@ -501,3 +538,13 @@ async def delete_user_by_id(user_id: str, user=Depends(get_admin_user)):
         status_code=status.HTTP_403_FORBIDDEN,
         detail=ERROR_MESSAGES.ACTION_PROHIBITED,
     )
+
+
+############################
+# GetUserGroupsById
+############################
+
+
+@router.get("/{user_id}/groups")
+async def get_user_groups_by_id(user_id: str, user=Depends(get_admin_user)):
+    return Groups.get_groups_by_member_id(user_id)
