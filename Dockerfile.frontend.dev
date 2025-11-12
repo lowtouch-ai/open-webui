@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y \
 COPY package.json package-lock.json ./
 
 # Install Node.js dependencies
-RUN npm ci
+RUN corepack enable && yarn install
 
 # We'll mount the source code as volumes in docker-compose
 # so we don't need to copy it here
