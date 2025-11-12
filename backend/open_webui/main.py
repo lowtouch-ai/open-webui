@@ -1485,6 +1485,9 @@ async def chat_completion(
         if model_info_params.get("reasoning_tags") is not None:
             reasoning_tags = model_info_params.get("reasoning_tags")
 
+        if model_info_params.get("reasoning_tags") is not None:
+            reasoning_tags = model_info_params.get("reasoning_tags")
+
         metadata = {
             "user_id": user.id,
             "chat_id": form_data.pop("chat_id", None),

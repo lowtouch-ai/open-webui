@@ -191,7 +191,7 @@
 			// Process the stream in the background
 			await processStream();
 		} else {
-			toast.error('An error occurred while fetching the explanation');
+			toast.error($i18n.t('An error occurred while fetching the explanation'));
 		}
 	};
 
