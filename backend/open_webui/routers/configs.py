@@ -10,6 +10,10 @@ from open_webui.config import get_config, save_config
 from open_webui.config import BannerModel
 from open_webui.config import ENABLE_VAULT_INTEGRATION, VAULT_URL, VAULT_TOKEN, VAULT_MOUNT_PATH, VAULT_VERSION, VAULT_TIMEOUT, VAULT_VERIFY_SSL
 
+from open_webui.utils.vault import store_agent_connection_in_vault, get_agent_connection_from_vault, delete_agent_connection_from_vault, sanitize_agent_name, sanitize_key_field
+from loguru import logger
+from pydantic import BaseModel, ConfigDict
+
 from open_webui.utils.tools import (
     get_tool_server_data,
     get_tool_server_url,
@@ -27,14 +31,35 @@ from open_webui.utils.oauth import (
     OAuthClientInformationFull,
 )
 from mcp.shared.auth import OAuthMetadata
-from open_webui.utils.vault import store_agent_connection_in_vault, get_agent_connection_from_vault, delete_agent_connection_from_vault
-from loguru import logger
 
 
 router = APIRouter()
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
+
+
+def _parse_requested_keys(raw_keys: Optional[str]) -> Optional[set[tuple[str, str]]]:
+    """Parse X-LTAI-Vault-Keys header into a set of (scope, key_name) pairs.
+
+    Supported items only:
+      - "COMMON/<key_name>"
+      - "<agent_scope>/<key_name>" where agent_scope is underscore-normalized
+
+    Returns a set of tuples: (scope, key_name) where scope is "common" for COMMON, or the agent scope as-is.
+    Items without a '/' are ignored. Key names are SANITIZED (slashes/backslashes -> underscore)
+    to match stored field names in Vault.
+    """
+    if not raw_keys:
+        return None
+    items = [k.strip() for k in raw_keys.split(',') if k.strip()]
+    parsed: set[tuple[str, str]] = set()
+    for item in items:
+        if '/' in item:
+            scope_part, key_part = item.split('/', 1)
+            scope = 'common' if scope_part == 'COMMON' else scope_part
+            parsed.add((scope, sanitize_key_field(key_part)))
+    return parsed if parsed else None
 
 
 ############################
@@ -550,6 +575,151 @@ async def set_agent_connections_config(
         for connection in connections:
             # Store the secret in Vault
             success = store_agent_connection_in_vault(connection, user.id)
+            
+            # If successfully stored in Vault, remove the value from the connection
+            # to avoid storing it in the database
+            if success:
+                # Keep a placeholder value to indicate it's stored in Vault
+                connection["value"] = "[STORED_IN_VAULT]"
+                logger.info(f"Stored agent connection {connection.get('name')} for user {user.id} in Vault")
+            else:
+                logger.error(f"Failed to store agent connection {connection.get('name')} for user {user.id} in Vault")
+    
+    # Update the PersistentConfig value (or set directly if it's a list)
+    agent_connections = request.app.state.config.AGENT_CONNECTIONS
+    if hasattr(agent_connections, 'value'):
+        agent_connections.value = connections
+    else:
+        # If it's not a PersistentConfig, set it directly
+        request.app.state.config.AGENT_CONNECTIONS = connections
+
+    # Return the current value
+    if hasattr(request.app.state.config.AGENT_CONNECTIONS, 'value'):
+        return {"AGENT_CONNECTIONS": request.app.state.config.AGENT_CONNECTIONS.value}
+    else:
+        return {"AGENT_CONNECTIONS": request.app.state.config.AGENT_CONNECTIONS}
+
+
+@router.get("/agent_connections", response_model=AgentConnectionsConfigForm)
+async def get_agent_connections_config(request: Request, user=Depends(get_verified_user)):
+    # Admin users can see all connections
+    if user.role == "admin":
+        # Handle case where AGENT_CONNECTIONS might be a list instead of PersistentConfig
+        agent_connections = request.app.state.config.AGENT_CONNECTIONS
+        if hasattr(agent_connections, 'value'):
+            connections = agent_connections.value
+        else:
+            # If it's already a list, use it directly
+            connections = agent_connections if isinstance(agent_connections, list) else []
+        
+        # Headers for Vault
+        vault_user_id = request.headers.get('x-ltai-vault-user') or user.id
+        raw_keys = request.headers.get('x-ltai-vault-keys')
+        requested_keys = _parse_requested_keys(raw_keys)
+
+        # If Vault integration is enabled, fetch secrets from Vault
+        if ENABLE_VAULT_INTEGRATION.value:
+            updated_connections = []
+            for conn in connections:
+                # Compute scope for this connection
+                scope = (
+                    'common' if conn.get('is_common', False) else (
+                        'default' if not conn.get('agent_id') else sanitize_agent_name(conn.get('agent_id'))
+                    )
+                )
+                # Filter by requested (scope, sanitized key) if provided
+                if requested_keys and (scope, sanitize_key_field(conn.get('name'))) not in requested_keys:
+                    continue
+                # Try to get the value from Vault
+                vault_value = get_agent_connection_from_vault(
+                    name=conn.get("name"),
+                    user_id=vault_user_id,
+                    is_common=conn.get("is_common", False),
+                    agent_id=conn.get("agent_id")
+                )
+                
+                # If found in Vault, use that value
+                if vault_value is not None:
+                    conn_copy = dict(conn)
+                    conn_copy["value"] = vault_value
+                    updated_connections.append(conn_copy)
+                else:
+                    updated_connections.append(conn)
+            
+            return {"AGENT_CONNECTIONS": updated_connections}
+        
+        return {"AGENT_CONNECTIONS": connections}
+    
+    # Regular users can only see common connections or ones associated with their agents
+    # Check if user has agents property
+    user_agents = getattr(user, 'agents', [])
+    
+    # Handle case where AGENT_CONNECTIONS might be a list instead of PersistentConfig
+    agent_connections = request.app.state.config.AGENT_CONNECTIONS
+    if hasattr(agent_connections, 'value'):
+        all_connections = agent_connections.value
+    else:
+        all_connections = agent_connections if isinstance(agent_connections, list) else []
+    
+    user_connections = [
+        conn for conn in all_connections
+        if conn.get("is_common", False) or (conn.get("agent_id") and conn.get("agent_id") in user_agents)
+    ]
+    
+    # Headers for Vault
+    vault_user_id = request.headers.get('x-ltai-vault-user') or user.id
+    raw_keys = request.headers.get('x-ltai-vault-keys')
+    requested_keys = _parse_requested_keys(raw_keys)
+
+    # If Vault integration is enabled, fetch secrets from Vault
+    if ENABLE_VAULT_INTEGRATION.value:
+        updated_connections = []
+        for conn in user_connections:
+            # Compute scope for this connection
+            scope = (
+                'common' if conn.get('is_common', False) else (
+                    'default' if not conn.get('agent_id') else sanitize_agent_name(conn.get('agent_id'))
+                )
+            )
+            # Filter by requested (scope, sanitized key) if provided
+            if requested_keys and (scope, sanitize_key_field(conn.get('name'))) not in requested_keys:
+                continue
+            # Try to get the value from Vault
+            vault_value = get_agent_connection_from_vault(
+                name=conn.get("name"),
+                user_id=vault_user_id,
+                is_common=conn.get("is_common", False),
+                agent_id=conn.get("agent_id")
+            )
+            
+            # If found in Vault, use that value
+            if vault_value is not None:
+                conn_copy = dict(conn)
+                conn_copy["value"] = vault_value
+                updated_connections.append(conn_copy)
+            else:
+                updated_connections.append(conn)
+        
+        return {"AGENT_CONNECTIONS": updated_connections}
+    
+    return {"AGENT_CONNECTIONS": user_connections}
+
+
+@router.post("/agent_connections", response_model=AgentConnectionsConfigForm)
+async def set_agent_connections_config(
+    request: Request,
+    form_data: AgentConnectionsConfigForm,
+    user=Depends(get_admin_user),
+):
+    connections = [connection.model_dump() for connection in form_data.AGENT_CONNECTIONS]
+    
+    # If Vault integration is enabled, store secrets in Vault
+    if ENABLE_VAULT_INTEGRATION.value:
+        # Use header override for Vault user id if provided
+        vault_user_id = request.headers.get('x-ltai-vault-user') or user.id
+        for connection in connections:
+            # Store the secret in Vault
+            success = store_agent_connection_in_vault(connection, vault_user_id)
             
             # If successfully stored in Vault, remove the value from the connection
             # to avoid storing it in the database

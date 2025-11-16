@@ -1473,6 +1473,17 @@ async def chat_completion(
         # Model Params
         if model_info_params.get("stream_delta_chunk_size"):
             stream_delta_chunk_size = model_info_params.get("stream_delta_chunk_size")
+        # Extract LTAI headers (only headers starting with x-ltai-)
+        vault_user_id = request.headers.get('x-ltai-vault-user')
+        vault_keys = request.headers.get('x-ltai-vault-keys')
+        ltai_headers = {
+            k: v for k, v in request.headers.items() if k.lower().startswith('x-ltai-')
+        }
+
+        log.info(f"[LTAI] incoming ltai headers (keys): {list(ltai_headers.keys())}")
+
+        if model_info_params.get("reasoning_tags") is not None:
+            reasoning_tags = model_info_params.get("reasoning_tags")
 
         if model_info_params.get("reasoning_tags") is not None:
             reasoning_tags = model_info_params.get("reasoning_tags")
@@ -1502,6 +1513,19 @@ async def chat_completion(
                     else "default"
                 ),
             },
+            "vault_user_id": vault_user_id,
+            "vault_keys": vault_keys,
+            "ltai_headers": ltai_headers,
+            **(
+                {"function_calling": "native"}
+                if form_data.get("params", {}).get("function_calling") == "native"
+                or (
+                    model_info
+                    and model_info.params.model_dump().get("function_calling")
+                    == "native"
+                )
+                else {}
+            ),
         }
 
         if metadata.get("chat_id") and (user and user.role != "admin"):

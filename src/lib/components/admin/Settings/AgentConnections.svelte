@@ -8,9 +8,10 @@
 
 	const dispatch = createEventDispatcher();
 
+	import AgentConnectionsBase from '$lib/components/common/AgentConnections/AgentConnectionsBase.svelte';
+
 	import {
 		listAllAgentConnections,
-		getAgentConnectionsStatus,
 		type AgentConnection
 	} from '$lib/apis/agent-connections';
 
@@ -18,46 +19,17 @@
 
 	let loading = true;
 	let connections: AgentConnection[] = [];
-	let vaultStatus = null;
 
-	// Summary data
-	$: userSummary = connections.reduce((acc, conn) => {
-		const userId = conn.user_id || 'unknown';
-		const userName = conn.user_name || conn.user_email || 'Unknown User';
-		
-		if (!acc[userId]) {
-			acc[userId] = {
-				name: userName,
-				count: 0,
-				commonCount: 0,
-				specificCount: 0
-			};
-		}
-		
-		acc[userId].count++;
-		if (conn.is_common) {
-			acc[userId].commonCount++;
-		} else {
-			acc[userId].specificCount++;
-		}
-		
-		return acc;
-	}, {});
-
-	$: totalUsers = Object.keys(userSummary).length;
-	$: totalConnections = connections.length;
+	// Summary state
+	let totalConnections = 0;
+	let userCountEntries: Array<[string, number]> = [];
+	let agentCountEntries: Array<[string, number]> = [];
+	let scopeCountEntries: Array<[string, number]> = [];
 
 	const fetchConnections = async () => {
 		loading = true;
 		try {
-			// First check Vault status
-			vaultStatus = await getAgentConnectionsStatus($userStore.token);
-			console.log('Vault status:', vaultStatus);
-			
-			const result = await listAllAgentConnections($userStore.token);
-			console.log('Agent connections API response:', result);
-			console.log('Number of connections:', result.length);
-			connections = result;
+			connections = await listAllAgentConnections($userStore.token);
 		} catch (error) {
 			console.error('Error fetching agent connections:', error);
 			toast.error($i18n.t('Failed to fetch agent connections'));
@@ -66,154 +38,88 @@
 		}
 	};
 
+	// Compute summary reactively
+	$: totalConnections = connections.length;
+	$: {
+		const userCounts = new Map<string, number>();
+		const agentCounts = new Map<string, number>();
+		let common = 0;
+		let scoped = 0;
+		for (const c of connections) {
+			const uname = c.user_name || $i18n.t('Unknown');
+			userCounts.set(uname, (userCounts.get(uname) || 0) + 1);
+			const agent = c.agent_id && c.agent_id.length > 0 ? c.agent_id : $i18n.t('Unassigned');
+			agentCounts.set(agent, (agentCounts.get(agent) || 0) + 1);
+			if (c.is_common) common += 1; else scoped += 1;
+		}
+		userCountEntries = Array.from(userCounts.entries()).sort((a, b) => {
+			if (b[1] !== a[1]) return b[1] - a[1];
+			return a[0].localeCompare(b[0]);
+		});
+		agentCountEntries = Array.from(agentCounts.entries()).sort((a, b) => {
+			if (b[1] !== a[1]) return b[1] - a[1];
+			return a[0].localeCompare(b[0]);
+		});
+		const commonLabel = $i18n.t('Common');
+		const scopedLabel = $i18n.t('Scoped');
+		scopeCountEntries = [
+			[commonLabel, common],
+			[scopedLabel, scoped]
+		];
+	}
+
 	onMount(() => {
 		fetchConnections();
 	});
 </script>
 
-<form
-	class="flex flex-col h-full justify-between space-y-3 text-sm"
-	on:submit|preventDefault={() => {
-		// No form submission needed for this view
+<AgentConnectionsBase 
+	title="Agent Connections"
+	showAddButton={false}
+	showUserColumn={true}
+	bind:connections
+	bind:loading
+	customFetchConnections={fetchConnections}
+	on:save={() => {
+		onSave();
+		dispatch('save');
 	}}
->
-	<div class="mt-0.5 space-y-3 overflow-y-scroll scrollbar-hidden h-full">
-		<div class="">
-			<div class="mb-3.5">
-				<div class=" mb-2.5 text-base font-medium">{$i18n.t('Agent Connections Overview')}</div>
+/>
 
-				<hr class=" border-gray-100 dark:border-gray-850 my-2" />
 
-				{#if loading}
-					<div class="flex justify-center items-center py-8">
-						<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 dark:border-white" />
-					</div>
-				{:else}
-					<!-- Summary Stats -->
-					<div class="mb-2.5">
-						<div class=" mb-1 text-xs font-medium">{$i18n.t('Summary')}</div>
-						<div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-							<div class="bg-gray-50 dark:bg-gray-850 rounded-lg p-3">
-								<div class="text-lg font-bold text-gray-700 dark:text-gray-300">{totalConnections}</div>
-								<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Total Connections')}</div>
-							</div>
-							<div class="bg-gray-50 dark:bg-gray-850 rounded-lg p-3">
-								<div class="text-lg font-bold text-gray-700 dark:text-gray-300">{totalUsers}</div>
-								<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Active Users')}</div>
-							</div>
-							<div class="bg-gray-50 dark:bg-gray-850 rounded-lg p-3">
-								<div class="text-lg font-bold text-gray-700 dark:text-gray-300">
-									{connections.filter(c => c.is_common).length}
-								</div>
-								<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Common Connections')}</div>
-							</div>
-						</div>
-					</div>
+{#if !loading && connections.length > 0}
 
-					{#if totalConnections === 0}
-						<div class="flex flex-col items-center justify-center py-8 text-gray-500">
-							<div class="text-sm font-medium mb-2">{$i18n.t('No agent connections')}</div>
-							{#if vaultStatus}
-								{#if !vaultStatus.vault_enabled}
-									<div class="text-xs text-center">
-										<div class="text-red-600 dark:text-red-400 font-medium mb-1">
-											{$i18n.t('HashiCorp Vault integration is disabled')}
-										</div>
-										<div class="text-gray-500">
-											{$i18n.t('Agent connections require Vault to be configured.')}<br/>
-											{$i18n.t('Set ENABLE_VAULT_INTEGRATION=true to enable this feature.')}
-										</div>
-									</div>
-								{:else if !vaultStatus.vault_available}
-									<div class="text-xs text-center">
-										<div class="text-orange-600 dark:text-orange-400 font-medium mb-1">
-											{$i18n.t('HashiCorp Vault is not available')}
-										</div>
-										<div class="text-gray-500">
-											{$i18n.t('Vault is enabled but connection failed.')}<br/>
-											{$i18n.t('Check Vault server configuration and connectivity.')}
-										</div>
-									</div>
-								{:else}
-									<div class="text-xs text-center">
-										{$i18n.t('Vault is configured and available.')}<br/>
-										{$i18n.t('Users can create connections through their settings.')}
-									</div>
-								{/if}
-							{:else}
-								<div class="text-xs text-center">
-									{$i18n.t('Loading configuration...')}
-								</div>
-							{/if}
-						</div>
-					{:else}
-						<!-- User Summary Table -->
-						<div class="mb-2.5">
-							<div class=" mb-1 text-xs font-medium">{$i18n.t('Connections by User')}</div>
-							<div class="bg-gray-50 dark:bg-gray-850 rounded-lg border border-gray-200 dark:border-gray-700">
-								<div class="overflow-x-auto">
-									<table class="min-w-full text-xs">
-										<thead class="bg-gray-100 dark:bg-gray-800">
-											<tr>
-												<th class="px-3 py-2 text-left font-medium text-gray-700 dark:text-gray-300">
-													{$i18n.t('User')}
-												</th>
-												<th class="px-3 py-2 text-center font-medium text-gray-700 dark:text-gray-300">
-													{$i18n.t('Total')}
-												</th>
-												<th class="px-3 py-2 text-center font-medium text-gray-700 dark:text-gray-300">
-													{$i18n.t('Personal')}
-												</th>
-												<th class="px-3 py-2 text-center font-medium text-gray-700 dark:text-gray-300">
-													{$i18n.t('Common')}
-												</th>
-											</tr>
-										</thead>
-										<tbody class="bg-gray-50 dark:bg-gray-850 divide-y divide-gray-200 dark:border-gray-700">
-											{#each Object.entries(userSummary) as [userId, summary]}
-												<tr>
-													<td class="px-3 py-2">
-														<div class="text-xs text-gray-900 dark:text-gray-100">
-															{summary.name}
-														</div>
-													</td>
-													<td class="px-3 py-2 text-center">
-														<span class="text-xs text-gray-700 dark:text-gray-300">
-															{summary.count}
-														</span>
-													</td>
-													<td class="px-3 py-2 text-center">
-														<span class="text-xs text-gray-700 dark:text-gray-300">
-															{summary.specificCount}
-														</span>
-													</td>
-													<td class="px-3 py-2 text-center">
-														<span class="text-xs text-gray-700 dark:text-gray-300">
-															{summary.commonCount}
-														</span>
-													</td>
-												</tr>
-											{/each}
-										</tbody>
-									</table>
-								</div>
-							</div>
-						</div>
+<hr class=" border-gray-100 dark:border-gray-700/10 my-2.5 w-full" />
 
-						<!-- Refresh Button -->
-						<div class="flex justify-end">
-							<button
-								class="px-3 py-1.5 text-xs bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 transition rounded-lg font-medium"
-								type="button"
-								on:click={fetchConnections}
-								disabled={loading}
-							>
-								{loading ? $i18n.t('Refreshing...') : $i18n.t('Refresh')}
-							</button>
-						</div>
-					{/if}
-				{/if}
+
+<div class="mt-4 p-4 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-850">
+	<div class="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-3">{$i18n.t('Connections Summary')}</div>
+	<div class="text-xs text-gray-600 dark:text-gray-400 mb-3">{$i18n.t('Total connections')}: <span class="font-semibold">{totalConnections}</span></div>
+	<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+		<div>
+			<div class="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">{$i18n.t('By User')}</div>
+			<div class="flex flex-wrap gap-2">
+				{#each userCountEntries as [name, count]}
+					<span class="px-2 py-1 text-xs rounded-full bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-gray-700">{name}: {count}</span>
+				{/each}
+			</div>
+		</div>
+		<div>
+			<div class="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">{$i18n.t('By Model')}</div>
+			<div class="flex flex-wrap gap-2">
+				{#each agentCountEntries as [agent, count]}
+					<span class="px-2 py-1 text-xs rounded-full bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-gray-700">{agent}: {count}</span>
+				{/each}
+			</div>
+		</div>
+		<div>
+			<div class="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">{$i18n.t('By Scope')}</div>
+			<div class="flex flex-wrap gap-2">
+				{#each scopeCountEntries as [scope, count]}
+					<span class="px-2 py-1 text-xs rounded-full bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-gray-700">{scope}: {count}</span>
+				{/each}
 			</div>
 		</div>
 	</div>
-</form>
+</div>
+{/if}

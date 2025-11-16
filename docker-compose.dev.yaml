@@ -6,7 +6,8 @@ services:
     pull_policy: always
     tty: true
     restart: unless-stopped
-    image: ollama/ollama:${OLLAMA_DOCKER_TAG-latest}
+    image: ollama/ollama:0.12.10
+    #ollama/ollama:${OLLAMA_DOCKER_TAG-latest}
 
   vault:
     image: hashicorp/vault:latest

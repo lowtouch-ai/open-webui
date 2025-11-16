@@ -179,6 +179,8 @@
 
 			const uploadedFile = await uploadFile(localStorage.token, file, metadata).catch((e) => {
 				toast.error(`${e}`);
+				// Remove the failed file from the list
+				knowledge.files = knowledge.files.filter((item) => item.itemId !== tempItemId);
 				return null;
 			});
 
@@ -193,18 +195,23 @@
 				knowledge.files = knowledge.files.map((item) => {
 					if (item.itemId === tempItemId) {
 						item.id = uploadedFile.id;
+						item.status = 'processing';
 					}
 
 					// Remove temporary item id
 					delete item.itemId;
 					return item;
 				});
-				await addFileHandler(uploadedFile.id);
+				await addFileHandler(uploadedFile.id, tempItemId);
 			} else {
 				toast.error($i18n.t('Failed to upload file.'));
+				// Remove the failed file from the list
+				knowledge.files = knowledge.files.filter((item) => item.itemId !== tempItemId);
 			}
 		} catch (e) {
 			toast.error(`${e}`);
+			// Remove the failed file from the list
+			knowledge.files = knowledge.files.filter((item) => item.itemId !== tempItemId);
 		}
 	};
 
@@ -399,7 +406,7 @@
 		}
 	};
 
-	const addFileHandler = async (fileId) => {
+	const addFileHandler = async (fileId, tempItemId = null) => {
 		const updatedKnowledge = await addFileToKnowledgeById(localStorage.token, id, fileId).catch(
 			(e) => {
 				toast.error(`${e}`);
@@ -408,7 +415,18 @@
 		);
 
 		if (updatedKnowledge) {
-			knowledge = updatedKnowledge;
+			// Preserve files that are currently uploading or processing
+			const uploadingFiles = knowledge.files.filter(
+				(file) => file.status === 'uploading' || (file.itemId && file.itemId !== tempItemId)
+			);
+			
+			// Merge server state with local uploading state
+			const serverFiles = updatedKnowledge.files || [];
+			knowledge = {
+				...updatedKnowledge,
+				files: [...serverFiles, ...uploadingFiles]
+			};
+			
 			toast.success($i18n.t('File added successfully.'));
 		} else {
 			toast.error($i18n.t('Failed to add file.'));
@@ -426,7 +444,18 @@
 			console.log('Knowledge base updated:', updatedKnowledge);
 
 			if (updatedKnowledge) {
-				knowledge = updatedKnowledge;
+				// Preserve files that are currently uploading
+				const uploadingFiles = knowledge.files.filter(
+					(file) => file.status === 'uploading' || file.itemId
+				);
+				
+				// Merge server state with local uploading state
+				const serverFiles = updatedKnowledge.files || [];
+				knowledge = {
+					...updatedKnowledge,
+					files: [...serverFiles, ...uploadingFiles]
+				};
+				
 				toast.success($i18n.t('File removed successfully.'));
 			}
 		} catch (e) {
