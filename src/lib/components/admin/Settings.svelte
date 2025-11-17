@@ -146,7 +146,7 @@
 				? ''
 				: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
 			on:click={() => {
-				selectedTab = 'agent-connections';
+				goto('/admin/settings/agent-connections');
 			}}
 		>
 			<div class=" self-center mr-2">

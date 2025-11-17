@@ -203,75 +203,67 @@ async def list_all_agent_connections(user=Depends(get_admin_user)):
     """List all agent connections from all users (admin only)."""
     try:
         connections = []
-        
+
         if VAULT_CONFIG.value:
             # Get Vault client
             vault_client = get_vault_client()
             if vault_client and vault_client.connect():
                 try:
-                    # List all users under users/ prefix
-                    response = vault_client.client.secrets.kv.v1.list_secrets(
-                        path="users",
-                        mount_point=vault_client.mount_path
-                    )
-                    
-                    if response and 'data' in response and 'keys' in response['data']:
-                        # Get all user information once
-                        all_users = {u.id: u for u in Users.get_users()}
-                        
-                        for user_id in response['data']['keys']:
-                            if user_id.endswith('/'):
-                                user_id = user_id[:-1]  # Remove trailing slash
-                            
-                            # Get user info
-                            user_info = all_users.get(user_id)
-                            
-                            try:
-                                # List agent scopes for this user
-                                user_response = vault_client.client.secrets.kv.v1.list_secrets(
-                                    path=f"users/{user_id}",
-                                    mount_point=vault_client.mount_path
-                                )
-                                
-                                if user_response and 'data' in user_response and 'keys' in user_response['data']:
-                                    for agent_scope in user_response['data']['keys']:
-                                        agent_scope = agent_scope[:-1] if agent_scope.endswith('/') else agent_scope
-                                        agent_scope_decoded = agent_scope.lower()
-                                        secret_path = f"users/{user_id}/{agent_scope}"
-                                        secret = vault_client.client.secrets.kv.v1.read_secret(
-                                            path=secret_path,
-                                            mount_point=vault_client.mount_path
-                                        )
-                                        data = secret.get('data') if secret else None
-                                        if data:
-                                            for key_name in data.keys():
-                                                decoded_key_name = key_name
-                                                is_common = agent_scope_decoded == "common"
-                                                agent_id = None if agent_scope_decoded in ["common", "default"] else agent_scope_decoded
-                                                # Use lowercase scope for key_id for consistency
-                                                key_id = f"{user_id}_{decoded_key_name}_{agent_scope_decoded}"
-                                                connections.append(AgentConnectionResponse(
-                                                    key_id=key_id,
-                                                    key_name=decoded_key_name,
-                                                    agent_id=agent_id,
-                                                    is_common=is_common,
-                                                    created_at=datetime.now(),  # We don't have actual creation time from Vault
-                                                    user_id=user_id,
-                                                    user_name=user_info.name if user_info else None,
-                                                    user_email=user_info.email if user_info else None
-                                                ))
-                            except Exception as e:
-                                # If listing fails for a user, just skip them
-                                logger.debug(f"No agent connections found for user {user_id}: {str(e)}")
-                                
+                    # Get all user information once from the database.
+                    # Users.get_users() returns a dict {"users": [...], "total": N}
+                    users_result = Users.get_users()
+                    user_list = users_result.get("users", []) if isinstance(users_result, dict) else []
+                    all_users = {u.id: u for u in user_list}
+
+                    # Iterate over known users instead of listing the Vault root "users" path,
+                    # which may not be allowed by all Vault policies.
+                    for user_id, user_info in all_users.items():
+                        try:
+                            # List agent scopes for this user
+                            user_response = vault_client.client.secrets.kv.v1.list_secrets(
+                                path=f"users/{user_id}",
+                                mount_point=vault_client.mount_path
+                            )
+
+                            if user_response and 'data' in user_response and 'keys' in user_response['data']:
+                                for agent_scope in user_response['data']['keys']:
+                                    agent_scope = agent_scope[:-1] if agent_scope.endswith('/') else agent_scope
+                                    agent_scope_decoded = agent_scope.lower()
+                                    secret_path = f"users/{user_id}/{agent_scope}"
+                                    secret = vault_client.client.secrets.kv.v1.read_secret(
+                                        path=secret_path,
+                                        mount_point=vault_client.mount_path
+                                    )
+                                    data = secret.get('data') if secret else None
+                                    if data:
+                                        for key_name in data.keys():
+                                            decoded_key_name = key_name
+                                            is_common = agent_scope_decoded == "common"
+                                            agent_id = None if agent_scope_decoded in ["common", "default"] else agent_scope_decoded
+                                            # Use lowercase scope for key_id for consistency
+                                            key_id = f"{user_id}_{decoded_key_name}_{agent_scope_decoded}"
+                                            connections.append(AgentConnectionResponse(
+                                                key_id=key_id,
+                                                key_name=decoded_key_name,
+                                                agent_id=agent_id,
+                                                is_common=is_common,
+                                                created_at=datetime.now(),  # We don't have actual creation time from Vault
+                                                user_id=user_id,
+                                                user_name=user_info.name if user_info else None,
+                                                user_email=user_info.email if user_info else None
+                                            ))
+                        except Exception as e:
+                            # If listing fails for a user, just skip them
+                            logger.debug(f"No agent connections found for user {user_id}: {str(e)}")
+
                 except Exception as e:
                     # If listing fails, just return empty list
                     logger.debug(f"No agent connections found: {str(e)}")
-        
+
         logger.info(f"Admin listed {len(connections)} agent connections from all users")
-        
+
         return connections
-        
+
     except Exception as e:
         logger.error(f"Error listing all agent connections: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
