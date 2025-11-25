@@ -213,7 +213,32 @@ async def list_all_agent_connections(user=Depends(get_admin_user)):
                     # Users.get_users() returns a dict {"users": [...], "total": N}
                     users_result = Users.get_users()
                     user_list = users_result.get("users", []) if isinstance(users_result, dict) else []
-                    all_users = {u.id: u for u in user_list}
+                    
+                    # Debug: Log the type and content of user_list
+                    logger.debug(f"User list type: {type(user_list)}, length: {len(user_list)}")
+                    if user_list:
+                        logger.debug(f"First user item type: {type(user_list[0])}, value: {user_list[0]}")
+                    
+                    # Handle potential serialization issues - ensure we have proper UserModel objects
+                    all_users = {}
+                    for u in user_list:
+                        try:
+                            if hasattr(u, 'id'):
+                                all_users[u.id] = u
+                            else:
+                                # If u is a string (user_id), create a minimal user object
+                                logger.warning(f"Expected UserModel object but got {type(u)}: {u}")
+                                if isinstance(u, str):
+                                    # Create a minimal user-like object with just the id
+                                    class MinimalUser:
+                                        def __init__(self, user_id):
+                                            self.id = user_id
+                                            self.name = None
+                                            self.email = None
+                                    all_users[u] = MinimalUser(u)
+                        except Exception as e:
+                            logger.error(f"Error processing user item {u}: {str(e)}")
+                            continue
 
                     # Iterate over known users instead of listing the Vault root "users" path,
                     # which may not be allowed by all Vault policies.
