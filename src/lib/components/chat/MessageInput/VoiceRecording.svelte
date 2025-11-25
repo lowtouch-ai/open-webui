@@ -32,17 +32,29 @@
 	let durationSeconds = 0;
 	let durationCounter = null;
 
+	let isPaused = false;
+
+	$: isWebSpeechEngine = ($config?.audio?.stt?.engine ?? '') === 'web' || (($settings?.audio?.stt?.engine ?? '') === 'web');
+
 	let transcription = '';
 
 	const startDurationCounter = () => {
+		if (durationCounter) {
+			return;
+		}
 		durationCounter = setInterval(() => {
 			durationSeconds++;
 		}, 1000);
 	};
 
-	const stopDurationCounter = () => {
-		clearInterval(durationCounter);
-		durationSeconds = 0;
+	const stopDurationCounter = (reset = true) => {
+		if (durationCounter) {
+			clearInterval(durationCounter);
+			durationCounter = null;
+		}
+		if (reset) {
+			durationSeconds = 0;
+		}
 	};
 
 	$: if (recording) {
@@ -107,7 +119,7 @@
 			const processFrame = () => {
 				if (!recording || loading) return;
 
-				if (recording && !loading) {
+				if (!isPaused) {
 					analyser.getByteTimeDomainData(timeDomainData);
 					analyser.getByteFrequencyData(domainData);
 
@@ -178,6 +190,9 @@
 
 	const startRecording = async () => {
 		loading = true;
+		isPaused = false;
+		stopDurationCounter();
+		startDurationCounter();
 
 		try {
 			if (displayMedia) {
@@ -325,7 +340,7 @@
 	};
 
 	const stopRecording = async () => {
-		if (recording && mediaRecorder) {
+		if (recording && mediaRecorder && mediaRecorder.state !== 'inactive') {
 			await mediaRecorder.stop();
 		}
 
@@ -333,6 +348,7 @@
 			speechRecognition.stop();
 		}
 
+		isPaused = false;
 		stopDurationCounter();
 		audioChunks = [];
 
@@ -348,10 +364,12 @@
 		loading = true;
 		confirmed = true;
 
-		if (recording && mediaRecorder) {
+		if (recording && mediaRecorder && mediaRecorder.state !== 'inactive') {
 			await mediaRecorder.stop();
 		}
-		clearInterval(durationCounter);
+
+		isPaused = false;
+		stopDurationCounter();
 
 		if (stream) {
 			const tracks = stream.getTracks();
@@ -359,6 +377,34 @@
 		}
 
 		stream = null;
+	};
+
+	const pauseRecording = () => {
+		if (mediaRecorder && mediaRecorder.state === 'recording') {
+			mediaRecorder.pause();
+			stopDurationCounter(false);
+			isPaused = true;
+		}
+	};
+
+	const resumeRecording = () => {
+		if (mediaRecorder && mediaRecorder.state === 'paused') {
+			mediaRecorder.resume();
+			isPaused = false;
+			startDurationCounter();
+		}
+	};
+
+	const togglePause = () => {
+		if (!mediaRecorder || loading || isWebSpeechEngine) {
+			return;
+		}
+
+		if (isPaused) {
+			resumeRecording();
+		} else {
+			pauseRecording();
+		}
 	};
 
 	let resizeObserver;
@@ -452,7 +498,42 @@
 			</div>
 		</div>
 
-		<div class="flex items-center">
+		<div class="flex items-center gap-1.5">
+			{#if !isWebSpeechEngine}
+				<button
+					type="button"
+					class="inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60 disabled:opacity-50 disabled:cursor-not-allowed {isPaused
+						? 'bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-600 dark:text-indigo-200'
+						: 'bg-gray-200 hover:bg-gray-300 text-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-100'}"
+					class:cursor-not-allowed={loading}
+					disabled={loading}
+					aria-label={isPaused ? $i18n.t('Resume recording') : $i18n.t('Pause recording')}
+					on:click={() => {
+						togglePause();
+					}}
+				>
+					{#if isPaused}
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 24 24"
+							fill="currentColor"
+							class="h-4 w-4"
+						>
+							<path d="M5.25 4.5v15l13.5-7.5-13.5-7.5z" />
+						</svg>
+					{:else}
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 24 24"
+							fill="currentColor"
+							class="h-4 w-4"
+						>
+							<path d="M6.75 5.25h2.5c.414 0 .75.336.75.75v12a.75.75 0 01-.75.75h-2.5a.75.75 0 01-.75-.75v-12c0-.414.336-.75.75-.75zM14.75 5.25h2.5c.414 0 .75.336.75.75v12a.75.75 0 01-.75.75h-2.5a.75.75 0 01-.75-.75v-12c0-.414.336-.75.75-.75z" />
+						</svg>
+					{/if}
+				</button>
+			{/if}
+
 			{#if loading}
 				<div class=" text-gray-500 rounded-full cursor-not-allowed">
 					<svg

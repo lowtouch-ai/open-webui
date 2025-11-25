@@ -9,6 +9,7 @@
 
 	import { chatCompletion } from '$lib/apis/openai';
 
+	import { models } from '$lib/stores';
 	import ChatBubble from '$lib/components/icons/ChatBubble.svelte';
 	import LightBulb from '$lib/components/icons/LightBulb.svelte';
 	import Markdown from '../Messages/Markdown.svelte';
@@ -114,9 +115,10 @@
 
 		content = prompt;
 		responseContent = '';
-
-		let res;
-		[res, controller] = await chatCompletion(localStorage.token, {
+		// Extract agent ID from model for vault keys
+		const { extractAgentIdFromModel } = await import('$lib/utils/agent-connections');
+		const agentId = extractAgentIdFromModel($models.find(m => m.id === model));
+		const [res, controller] = await chatCompletion(localStorage.token, {
 			model: model,
 			messages: [
 				...messages,
@@ -138,7 +140,7 @@
 				: {}),
 
 			stream: true // Enable streaming
-		});
+		}, undefined, agentId);
 
 		if (res && res.ok) {
 			const reader = res.body.getReader();
@@ -187,13 +189,87 @@
 			};
 
 			// Process the stream in the background
-			try {
-				await processStream();
-			} catch (e) {
-				if (e.name !== 'AbortError') {
-					console.error(e);
+			await processStream();
+		} else {
+			toast.error($i18n.t('An error occurred while fetching the explanation'));
+		}
+	};
+
+	const explainHandler = async () => {
+		if (!model) {
+			toast.error('Model not selected');
+			return;
+		}
+		const explainText = $i18n.t('Explain this section to me in more detail');
+		prompt = `${explainText}\n\n\`\`\`\n${selectedText}\n\`\`\``;
+
+		responseContent = '';
+		// Extract agent ID from model for vault keys
+		const { extractAgentIdFromModel } = await import('$lib/utils/agent-connections');
+		const agentId = extractAgentIdFromModel($models.find(m => m.id === model));
+		const [res, controller] = await chatCompletion(localStorage.token, {
+			model: model,
+			messages: [
+				...messages,
+				{
+					role: 'user',
+					content: prompt
 				}
-			}
+			].map((message) => ({
+				role: message.role,
+				content: message.content
+			})),
+			stream: true // Enable streaming
+		}, undefined, agentId);
+
+		if (res && res.ok) {
+			const reader = res.body.getReader();
+			const decoder = new TextDecoder();
+
+			const processStream = async () => {
+				while (true) {
+					// Read data chunks from the response stream
+					const { done, value } = await reader.read();
+					if (done) {
+						break;
+					}
+
+					// Decode the received chunk
+					const chunk = decoder.decode(value, { stream: true });
+
+					// Process lines within the chunk
+					const lines = chunk.split('\n').filter((line) => line.trim() !== '');
+
+					for (const line of lines) {
+						if (line.startsWith('data: ')) {
+							if (line.startsWith('data: [DONE]')) {
+								responseDone = true;
+
+								await tick();
+								autoScroll();
+								continue;
+							} else {
+								// Parse the JSON chunk
+								try {
+									const data = JSON.parse(line.slice(6));
+
+									// Append the `content` field from the "choices" object
+									if (data.choices && data.choices[0]?.delta?.content) {
+										responseContent += data.choices[0].delta.content;
+
+										autoScroll();
+									}
+								} catch (e) {
+									console.error(e);
+								}
+							}
+						}
+					}
+				}
+			};
+
+			// Process the stream in the background
+			await processStream();
 		} else {
 			toast.error($i18n.t('An error occurred while fetching the explanation'));
 		}

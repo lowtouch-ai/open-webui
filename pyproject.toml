@@ -44,6 +44,7 @@ dependencies = [
     "APScheduler==3.10.4",
     "RestrictedPython==8.0",
 
+    "hvac==2.2.0",
     "loguru==0.7.3",
     "asgiref==3.8.1",
 

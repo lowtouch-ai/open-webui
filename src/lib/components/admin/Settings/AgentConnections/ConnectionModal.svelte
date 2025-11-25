@@ -85,10 +85,8 @@ $: if (mode === 'add' || !connection) {
   }
 }
 
-// No strict validation on name; allow arbitrary characters. Only require non-empty.
-function validateConnectionName(n: string) {
-  return n.length > 0;
-}
+// Validate connection name (no strict validation, allow arbitrary characters)
+const validateConnectionName = (n: string) => n.length > 0;
 
 function close() {
   // Reset form and state when closing
@@ -260,4 +258,4 @@ function confirmDelete() {
 	<div class="text-sm dark:text-gray-300">
 		{$i18n.t('Are you sure you want to delete this agent connection? This action cannot be undone.')}
 	</div>
-</ConfirmDialog> 
+</ConfirmDialog>

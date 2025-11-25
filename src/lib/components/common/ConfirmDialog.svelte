@@ -146,6 +146,7 @@
 							dispatch('cancel');
 						}}
 						type="button"
+						data-cy="cancel-delete-button"
 					>
 						{cancelLabel}
 					</button>
@@ -155,6 +156,7 @@
 							confirmHandler();
 						}}
 						type="button"
+						data-cy="confirm-delete-button"
 					>
 						{confirmLabel}
 					</button>

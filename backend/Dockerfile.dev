@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.4
 FROM python:3.11-slim
 
 WORKDIR /app/backend
@@ -6,19 +7,26 @@ WORKDIR /app/backend
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
-    software-properties-common \
+    # software-properties-common \
     git \
     && rm -rf /var/lib/apt/lists/*
+
+## Configure pip to use cache and be more resilient
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_DEFAULT_TIMEOUT=180 \
+    PIP_CACHE_DIR=/root/.cache/pip
 
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install cryptography==44.0.0
+# Install Python dependencies (use BuildKit cache for pip)
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements.txt && \
+    pip install cryptography==44.0.0
 
-# Install development dependencies
-RUN pip install --no-cache-dir uvicorn watchfiles
+# Install development dependencies (cached)
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install uvicorn watchfiles
 
 # We'll mount the backend code as a volume in docker-compose
 # so we don't need to copy it here
