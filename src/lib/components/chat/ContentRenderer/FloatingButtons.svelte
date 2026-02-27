@@ -14,6 +14,7 @@
 	import LightBulb from '$lib/components/icons/LightBulb.svelte';
 	import Markdown from '../Messages/Markdown.svelte';
 	import Skeleton from '../Messages/Skeleton.svelte';
+	import { chatId, models, socket } from '$lib/stores';
 
 	export let id = '';
 	export let messageId = '';
@@ -120,6 +121,9 @@
 		const agentId = extractAgentIdFromModel($models.find(m => m.id === model));
 		const [res, controller] = await chatCompletion(localStorage.token, {
 			model: model,
+			model_item: $models.find((m) => m.id === model),
+			session_id: $socket?.id,
+			chat_id: $chatId,
 			messages: [
 				...messages,
 				{
@@ -322,11 +326,12 @@
 	{#if responseContent === null}
 		{#if !floatingInput}
 			<div
-				class="flex flex-row gap-0.5 shrink-0 p-1 bg-white dark:bg-gray-850 dark:text-gray-100 text-medium rounded-lg shadow-xl"
+				class="flex flex-row shrink-0 p-0.5 bg-white dark:bg-gray-850 dark:text-gray-100 text-medium rounded-xl shadow-xl border border-gray-100 dark:border-gray-800"
 			>
 				{#each actions as action}
 					<button
-						class="px-1 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-sm flex items-center gap-1 min-w-fit"
+						aria-label={action.label}
+						class="px-1.5 py-[1px] hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl flex items-center gap-1 min-w-fit transition"
 						on:click={async () => {
 							selectedText = window.getSelection().toString();
 							selectedAction = action;
@@ -356,13 +361,14 @@
 			</div>
 		{:else}
 			<div
-				class="py-1 flex dark:text-gray-100 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-850 w-72 rounded-full shadow-xl"
+				class="py-1 flex dark:text-gray-100 bg-white dark:bg-gray-850 border border-gray-100 dark:border-gray-800 w-72 rounded-full shadow-xl"
 			>
 				<input
 					type="text"
 					id="floating-message-input"
 					class="ml-5 bg-transparent outline-hidden w-full flex-1 text-sm"
 					placeholder={$i18n.t('Ask a question')}
+					aria-label={$i18n.t('Ask a question')}
 					bind:value={floatingInputValue}
 					on:keydown={(e) => {
 						if (e.key === 'Enter') {
@@ -371,8 +377,9 @@
 					}}
 				/>
 
-				<div class="ml-1 mr-2">
+				<div class="ml-1 mr-1">
 					<button
+						aria-label={$i18n.t('Submit question')}
 						class="{floatingInputValue !== ''
 							? 'bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100 '
 							: 'text-white bg-gray-200 dark:text-gray-900 dark:bg-gray-700 disabled'} transition rounded-full p-1.5 m-0.5 self-center"
@@ -397,19 +404,22 @@
 			</div>
 		{/if}
 	{:else}
-		<div class="bg-white dark:bg-gray-850 dark:text-gray-100 rounded-xl shadow-xl w-80 max-w-full">
+		<div
+			class="bg-white dark:bg-gray-850 dark:text-gray-100 rounded-3xl shadow-xl w-80 max-w-full border border-gray-100 dark:border-gray-800"
+		>
 			<div
-				class="bg-gray-50/50 dark:bg-gray-800 dark:text-gray-100 text-medium rounded-xl px-3.5 py-3 w-full"
+				class="bg-white dark:bg-gray-850 dark:text-gray-100 text-medium rounded-3xl px-3.5 pt-3 w-full"
 			>
 				<div class="font-medium">
 					<Markdown id={`${id}-float-prompt`} {content} />
 				</div>
 			</div>
 
-			<div
-				class="bg-white dark:bg-gray-850 dark:text-gray-100 text-medium rounded-xl px-3.5 py-3 w-full"
-			>
-				<div class=" max-h-80 overflow-y-auto w-full markdown-prose-xs" id="response-container">
+			<div class="bg-white dark:bg-gray-850 dark:text-gray-100 text-medium rounded-4xl w-full">
+				<div
+					class=" max-h-80 overflow-y-auto w-full markdown-prose-xs px-3.5 py-3"
+					id="response-container"
+				>
 					{#if !responseContent || responseContent?.trim() === ''}
 						<Skeleton size="sm" />
 					{:else}

@@ -351,6 +351,7 @@
 		isPaused = false;
 		stopDurationCounter();
 		audioChunks = [];
+		visualizerData = Array(VISUALIZER_BUFFER_LENGTH).fill(0);
 
 		if (stream) {
 			const tracks = stream.getTracks();
@@ -413,7 +414,17 @@
 	let maxVisibleItems = 300;
 	$: maxVisibleItems = Math.floor(containerWidth / 5); // 2px width + 0.5px gap
 
+	const handleKeyDown = (e) => {
+		if (e.key === 'Escape') {
+			e.preventDefault();
+			stopRecording();
+			onCancel();
+		}
+	};
+
 	onMount(() => {
+		window.addEventListener('keydown', handleKeyDown);
+
 		// listen to width changes
 		resizeObserver = new ResizeObserver(() => {
 			VISUALIZER_BUFFER_LENGTH = Math.floor(window.innerWidth / 4);
@@ -430,6 +441,7 @@
 	});
 
 	onDestroy(() => {
+		window.removeEventListener('keydown', handleKeyDown);
 		// remove resize observer
 		resizeObserver.disconnect();
 	});
@@ -627,6 +639,7 @@
 				</div>
 			{:else}
 				<button
+					id="confirm-recording-button"
 					type="button"
 					class="p-1.5 bg-indigo-500 text-white dark:bg-indigo-500 dark:text-blue-950 rounded-full"
 					on:click={async () => {

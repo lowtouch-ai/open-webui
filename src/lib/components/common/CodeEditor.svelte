@@ -104,6 +104,12 @@
 		})
 	);
 
+	// Add 'matlab' alias to Octave language (MATLAB-compatible syntax)
+	const octaveLang = languages.find((l) => l.name === 'Octave');
+	if (octaveLang && !octaveLang.alias.includes('matlab')) {
+		octaveLang.alias.push('matlab');
+	}
+
 	const getLang = async () => {
 		const language = languages.find((l) => l.alias.includes(lang));
 		return await language?.load();
@@ -250,7 +256,6 @@ print("${endTag}")
 	};
 
 	onMount(() => {
-		console.log(value);
 		if (value === '') {
 			value = boilerplate;
 		}

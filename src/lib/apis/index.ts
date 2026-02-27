@@ -1,9 +1,6 @@
-import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+import { WEBUI_BASE_URL } from '$lib/constants';
 import { convertOpenApiToToolPayload } from '$lib/utils';
 import { getOpenAIModelsDirect } from './openai';
-
-import { parse } from 'yaml';
-import { toast } from 'svelte-sonner';
 
 export const getModels = async (
 	token: string = '',
@@ -316,7 +313,7 @@ export const getToolServerData = async (token: string, url: string) => {
 			// Check if URL ends with .yaml or .yml to determine format
 			if (url.toLowerCase().endsWith('.yaml') || url.toLowerCase().endsWith('.yml')) {
 				if (!res.ok) throw await res.text();
-				const text = await res.text();
+				const [text, { parse }] = await Promise.all([res.text(), import('yaml')]);
 				return parse(text);
 			} else {
 				if (!res.ok) throw await res.json();
@@ -382,6 +379,13 @@ export const getToolServersData = async (servers: object[]) => {
 					}
 
 					if (res) {
+						if (!res.paths) {
+							return {
+								error: 'Invalid OpenAPI spec',
+								url: server?.url
+							};
+						}
+
 						const { openapi, info, specs } = {
 							openapi: res,
 							info: res.info,
@@ -445,8 +449,9 @@ export const executeToolServer = async (
 
 		if (operation.parameters) {
 			operation.parameters.forEach((param: any) => {
-				const paramName = param.name;
-				const paramIn = param.in;
+				const paramName = param?.name;
+				if (!paramName) return;
+				const paramIn = param?.in;
 				if (params.hasOwnProperty(paramName)) {
 					if (paramIn === 'path') {
 						pathParams[paramName] = params[paramName];
@@ -494,7 +499,10 @@ export const executeToolServer = async (
 			headers
 		};
 
-		if (['post', 'put', 'patch'].includes(httpMethod.toLowerCase()) && operation.requestBody) {
+		if (
+			['post', 'put', 'patch', 'delete'].includes(httpMethod.toLowerCase()) &&
+			operation.requestBody
+		) {
 			requestOptions.body = JSON.stringify(bodyParams);
 		}
 
@@ -856,7 +864,8 @@ export const generateQueries = async (
 	model: string,
 	messages: object[],
 	prompt: string,
-	type: string = 'web_search'
+	type: string = 'web_search',
+	chat_id?: string
 ) => {
 	let error = null;
 
@@ -871,7 +880,8 @@ export const generateQueries = async (
 			model: model,
 			messages: messages,
 			prompt: prompt,
-			type: type
+			type: type,
+			...(chat_id && { chat_id: chat_id })
 		})
 	})
 		.then(async (res) => {
@@ -925,7 +935,8 @@ export const generateAutoCompletion = async (
 	model: string,
 	prompt: string,
 	messages?: object[],
-	type: string = 'search query'
+	type: string = 'search query',
+	chat_id?: string
 ) => {
 	const controller = new AbortController();
 	let error = null;
@@ -943,7 +954,8 @@ export const generateAutoCompletion = async (
 			prompt: prompt,
 			...(messages && { messages: messages }),
 			type: type,
-			stream: false
+			stream: false,
+			...(chat_id && { chat_id: chat_id })
 		})
 	})
 		.then(async (res) => {
@@ -1379,6 +1391,33 @@ export const getChangelog = async () => {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json'
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const getVersion = async (token: string) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_BASE_URL}/api/version`, {
+		method: 'GET',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
 		}
 	})
 		.then(async (res) => {
