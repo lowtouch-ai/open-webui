@@ -17,6 +17,7 @@
 	import Tags from './common/Tags.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
+	import Textarea from './common/Textarea.svelte';
 
 	export let onSubmit: Function = () => {};
 	export let onDelete: Function = () => {};
@@ -41,6 +42,9 @@
 	let prefixId = '';
 	let enable = true;
 	let apiVersion = '';
+	let apiType = ''; // '' = chat completions (default), 'responses' = Responses API
+
+	let headers = '';
 
 	let tags = [];
 
@@ -69,6 +73,22 @@
 		// remove trailing slash from url
 		url = url.replace(/\/$/, '');
 
+		let _headers = null;
+
+		if (headers) {
+			try {
+				_headers = JSON.parse(headers);
+				if (typeof _headers !== 'object' || Array.isArray(_headers)) {
+					_headers = null;
+					throw new Error('Headers must be a valid JSON object');
+				}
+				headers = JSON.stringify(_headers, null, 2);
+			} catch (error) {
+				toast.error($i18n.t('Headers must be a valid JSON object'));
+				return;
+			}
+		}
+
 		const res = await verifyOpenAIConnection(
 			localStorage.token,
 			{
@@ -77,7 +97,8 @@
 				config: {
 					auth_type,
 					azure: azure,
-					api_version: apiVersion
+					api_version: apiVersion,
+					...(_headers ? { headers: _headers } : {})
 				}
 			},
 			direct
@@ -136,6 +157,19 @@
 			}
 		}
 
+		if (headers) {
+			try {
+				const _headers = JSON.parse(headers);
+				if (typeof _headers !== 'object' || Array.isArray(_headers)) {
+					throw new Error('Headers must be a valid JSON object');
+				}
+				headers = JSON.stringify(_headers, null, 2);
+			} catch (error) {
+				toast.error($i18n.t('Headers must be a valid JSON object'));
+				return;
+			}
+		}
+
 		// remove trailing slash from url
 		url = url.replace(/\/$/, '');
 
@@ -149,7 +183,9 @@
 				model_ids: modelIds,
 				connection_type: connectionType,
 				auth_type,
-				...(!ollama && azure ? { azure: true, api_version: apiVersion } : {})
+				headers: headers ? JSON.parse(headers) : undefined,
+				...(!ollama && azure ? { azure: true, api_version: apiVersion } : {}),
+				...(apiType ? { api_type: apiType } : {})
 			}
 		};
 
@@ -172,6 +208,9 @@
 			key = connection.key;
 
 			auth_type = connection.config.auth_type ?? 'bearer';
+			headers = connection.config?.headers
+				? JSON.stringify(connection.config.headers, null, 2)
+				: '';
 
 			enable = connection.config?.enable ?? true;
 			tags = connection.config?.tags ?? [];
@@ -184,6 +223,7 @@
 				connectionType = connection.config?.connection_type ?? 'external';
 				azure = connection.config?.azure ?? false;
 				apiVersion = connection.config?.api_version ?? '';
+				apiType = connection.config?.api_type ?? '';
 			}
 		}
 	};
@@ -269,14 +309,27 @@
 										bind:value={url}
 										placeholder={$i18n.t('API Base URL')}
 										autocomplete="off"
+										list={ollama ? undefined : 'suggestions'}
 										required
 									/>
+
+									{#if !ollama}
+										<datalist id="suggestions">
+											<option value="https://api.openai.com/v1" />
+											<option value="https://api.anthropic.com/v1" />
+											<option value="https://generativelanguage.googleapis.com/v1beta/openai" />
+											<option value="https://api.mistral.ai/v1" />
+											<option value="https://api.groq.com/openai/v1" />
+											<option value="https://openrouter.ai/api/v1" />
+											<option value="https://api.x.ai/v1" />
+										</datalist>
+									{/if}
 								</div>
 							</div>
 
 							<Tooltip content={$i18n.t('Verify Connection')} className="self-end -mb-1">
 								<button
-									class="self-center p-1 bg-transparent hover:bg-gray-100 dark:bg-gray-900 dark:hover:bg-gray-850 rounded-lg transition"
+									class="self-center p-1 bg-transparent hover:bg-gray-100 dark:hover:bg-gray-850 rounded-lg transition"
 									on:click={() => {
 										verifyHandler();
 									}}
@@ -321,7 +374,7 @@
 									<div class="flex-shrink-0 self-start">
 										<select
 											id="select-bearer-or-session"
-											class={`w-full text-sm bg-transparent pr-5 ${($settings?.highContrastMode ?? false) ? 'placeholder:text-gray-700 dark:placeholder:text-gray-100' : 'outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700'}`}
+											class={`dark:bg-gray-900 w-full text-sm bg-transparent pr-5 ${($settings?.highContrastMode ?? false) ? 'placeholder:text-gray-700 dark:placeholder:text-gray-100' : 'outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700'}`}
 											bind:value={auth_type}
 										>
 											<option value="none">{$i18n.t('None')}</option>
@@ -375,6 +428,35 @@
 								</div>
 							</div>
 						</div>
+
+						{#if !ollama && !direct}
+							<div class="flex gap-2 mt-2">
+								<div class="flex flex-col w-full">
+									<label
+										for="headers-input"
+										class={`mb-0.5 text-xs text-gray-500
+								${($settings?.highContrastMode ?? false) ? 'text-gray-800 dark:text-gray-100' : ''}`}
+										>{$i18n.t('Headers')}</label
+									>
+
+									<div class="flex-1">
+										<Tooltip
+											content={$i18n.t(
+												'Enter additional headers in JSON format (e.g. {"X-Custom-Header": "value"}'
+											)}
+										>
+											<Textarea
+												className="w-full text-sm outline-hidden"
+												bind:value={headers}
+												placeholder={$i18n.t('Enter additional headers in JSON format')}
+												required={false}
+												minSize={30}
+											/>
+										</Tooltip>
+									</div>
+								</div>
+							</div>
+						{/if}
 
 						<div class="flex gap-2 mt-2">
 							<div class="flex flex-col w-full">
@@ -440,7 +522,7 @@
 									<div class="flex-1">
 										<input
 											id="api-version-input"
-											class={`w-full text-sm bg-transparent placeholder:text-gray-300 dark:placeholder:text-gray-700 ${($settings?.highContrastMode ?? false) ? 'placeholder:text-gray-700 dark:placeholder:text-gray-100' : 'outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700'}`}
+											class={`w-full text-sm bg-transparent ${($settings?.highContrastMode ?? false) ? 'placeholder:text-gray-700 dark:placeholder:text-gray-100' : 'outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700'}`}
 											type="text"
 											bind:value={apiVersion}
 											placeholder={$i18n.t('API Version')}
@@ -448,6 +530,45 @@
 											required
 										/>
 									</div>
+								</div>
+							</div>
+						{/if}
+
+						{#if !ollama && !direct}
+							<div class="flex flex-row justify-between items-center w-full mt-1">
+								<label
+									for="api-type-toggle"
+									class={`mb-0.5 text-xs text-gray-500
+							${($settings?.highContrastMode ?? false) ? 'text-gray-800 dark:text-gray-100' : ''}`}
+									>{$i18n.t('API Type')}</label
+								>
+
+								<div>
+									<button
+										on:click={() => {
+											apiType = apiType === 'responses' ? '' : 'responses';
+										}}
+										type="button"
+										id="api-type-toggle"
+										class=" text-xs text-gray-700 dark:text-gray-300"
+									>
+										{#if apiType === 'responses'}
+											<Tooltip
+												className="flex items-center gap-1"
+												content={$i18n.t(
+													'This feature is currently experimental and may not work as expected.'
+												)}
+											>
+												<span class=" text-gray-400 dark:text-gray-600"
+													>{$i18n.t('Experimental')}</span
+												>
+
+												{$i18n.t('Responses')}
+											</Tooltip>
+										{:else}
+											{$i18n.t('Chat Completions')}
+										{/if}
+									</button>
 								</div>
 							</div>
 						{/if}

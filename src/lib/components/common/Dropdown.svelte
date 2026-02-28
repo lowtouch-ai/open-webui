@@ -9,12 +9,15 @@
 	export let show = false;
 	export let side = 'bottom';
 	export let align = 'start';
+	export let closeOnOutsideClick = true;
+
 	const dispatch = createEventDispatcher();
 </script>
 
 <DropdownMenu.Root
 	bind:open={show}
 	closeFocus={false}
+	{closeOnOutsideClick}
 	onOpenChange={(state) => {
 		dispatch('change', state);
 	}}
@@ -32,15 +35,15 @@
 			{align}
 			transition={flyAndScale}
 		>
-			<DropdownMenu.Item class="flex items-center px-3 py-2 text-sm  font-medium">
+			<DropdownMenu.Item class="select-none flex items-center px-3 py-2 text-sm  font-medium">
 				<div class="flex items-center">{$i18n.t('Profile')}</div>
 			</DropdownMenu.Item>
 
-			<DropdownMenu.Item class="flex items-center px-3 py-2 text-sm  font-medium">
+			<DropdownMenu.Item class="select-none flex items-center px-3 py-2 text-sm  font-medium">
 				<div class="flex items-center">{$i18n.t('Profile')}</div>
 			</DropdownMenu.Item>
 
-			<DropdownMenu.Item class="flex items-center px-3 py-2 text-sm  font-medium">
+			<DropdownMenu.Item class="select-none flex items-center px-3 py-2 text-sm  font-medium">
 				<div class="flex items-center">{$i18n.t('Profile')}</div>
 			</DropdownMenu.Item>
 		</DropdownMenu.Content>
