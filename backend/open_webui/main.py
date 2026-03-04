@@ -1779,6 +1779,14 @@ async def chat_completion(
         if model_info_params.get("reasoning_tags") is not None:
             reasoning_tags = model_info_params.get("reasoning_tags")
 
+        # Extract LTAI headers (only headers starting with x-ltai-)
+        vault_user_id = request.headers.get("x-ltai-vault-user")
+        vault_keys = request.headers.get("x-ltai-vault-keys")
+        ltai_headers = {
+            k: v for k, v in request.headers.items() if k.lower().startswith("x-ltai-")
+        }
+        log.info(f"[LTAI] incoming ltai headers (keys): {list(ltai_headers.keys())}")
+
         metadata = {
             "user_id": user.id,
             "chat_id": form_data.pop("chat_id", None),
@@ -1794,6 +1802,9 @@ async def chat_completion(
             "variables": form_data.get("variables", {}),
             "model": model,
             "direct": model_item.get("direct", False),
+            "vault_user_id": vault_user_id,
+            "vault_keys": vault_keys,
+            "ltai_headers": ltai_headers,
             "params": {
                 "stream_delta_chunk_size": stream_delta_chunk_size,
                 "reasoning_tags": reasoning_tags,

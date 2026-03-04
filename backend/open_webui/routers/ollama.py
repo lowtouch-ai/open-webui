@@ -135,7 +135,7 @@ async def send_post_request(
     key: Optional[str] = None,
     content_type: Optional[str] = None,
     user: UserModel = None,
-    vault_keys: Optional[str] = None,  # Add vault_keys parameter
+    extra_headers: Optional[dict] = None,
     metadata: Optional[dict] = None,
 ):
 
@@ -156,8 +156,8 @@ async def send_post_request(
             if metadata and metadata.get("chat_id"):
                 headers[FORWARD_SESSION_INFO_HEADER_CHAT_ID] = metadata.get("chat_id")
 
-        if vault_keys:
-            headers["x-ltai-vault-keys"] = vault_keys
+        if extra_headers:
+            headers.update(extra_headers)
 
         r = await session.post(
             url,
@@ -1396,8 +1396,12 @@ async def generate_chat_completion(
     prefix_id = api_config.get("prefix_id", None)
     if prefix_id:
         payload["model"] = payload["model"].replace(f"{prefix_id}.", "")
-    # Extract x-ltai-vault-keys from request headers
-    vault_keys = request.headers.get("x-ltai-vault-keys")
+    # Collect all x-ltai-* headers from the incoming request to forward upstream
+    forwarded_headers = {
+        k: v for k, v in request.headers.items() if k.lower().startswith("x-ltai-")
+    }
+    log.info(f"[LTAI] forwarding ltai headers to ollama (keys): {list(forwarded_headers.keys())}")
+
     return await send_post_request(
         url=f"{url}/api/chat",
         payload=json.dumps(payload),
@@ -1405,7 +1409,7 @@ async def generate_chat_completion(
         key=get_api_key(url_idx, url, request.app.state.config.OLLAMA_API_CONFIGS),
         content_type="application/x-ndjson",
         user=user,
-        vault_keys=vault_keys,
+        extra_headers=forwarded_headers,
         metadata=metadata,
     )
 

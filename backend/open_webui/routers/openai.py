@@ -181,6 +181,11 @@ async def get_headers_and_cookies(
     if config.get("headers") and isinstance(config.get("headers"), dict):
         headers = {**headers, **config.get("headers")}
 
+    # Forward all x-ltai-* headers from the incoming request upstream
+    for k, v in request.headers.items():
+        if k.lower().startswith("x-ltai-"):
+            headers[k] = v
+
     return headers, cookies
 
 
