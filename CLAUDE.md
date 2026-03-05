@@ -123,13 +123,28 @@ All request headers starting with `x-ltai-` are extracted from the incoming chat
 | File | What was changed |
 |------|-----------------|
 | `backend/open_webui/main.py` | In `chat_completion()`: extract `vault_user_id`, `vault_keys`, and `ltai_headers` (all `x-ltai-*`) from request headers; add all three to the `metadata` dict |
-| `backend/open_webui/routers/ollama.py` | `send_post_request()`: replaced `vault_keys` param with `extra_headers: Optional[dict]`; calls `headers.update(extra_headers)`. In `generate_chat_completion()`: collects all `x-ltai-*` headers and passes them as `extra_headers` |
-| `backend/open_webui/routers/openai.py` | `get_headers_and_cookies()`: loop at the end copies every `x-ltai-*` header from the incoming request into the outbound headers dict |
+| `backend/open_webui/routers/ollama.py` | `send_post_request()`: replaced `vault_keys` param with `extra_headers: Optional[dict]`; calls `headers.update(extra_headers)`. In `generate_chat_completion()`: collects all `x-ltai-*` headers, normalises `x-ltai-vault-keys` via `sanitize_vault_keys_header()`, and passes them as `extra_headers` |
+| `backend/open_webui/routers/openai.py` | `get_headers_and_cookies()`: loop at the end copies every `x-ltai-*` header from the incoming request into the outbound headers dict, normalising `x-ltai-vault-keys` via `sanitize_vault_keys_header()` |
+| `backend/open_webui/utils/vault.py` | Added `sanitize_vault_keys_header(vault_keys_str, model)` — normalises vault key agent-name portion to match agent backend format |
 
 **Key headers used at runtime:**
 - `x-ltai-vault-user` — Vault user ID for secret lookup
 - `x-ltai-vault-keys` — comma-separated list of Vault keys to inject (e.g. `COMMON/api_key`)
 - Any other `x-ltai-*` header is passed through transparently
+
+**Vault key format for `x-ltai-vault-keys`:**
+
+The agent backend resolves keys using this agent-name derivation:
+```python
+agent_name = re.sub(r'[^a-zA-Z0-9]', '_', re.match(r'([^:]+)', model).group(1))
+```
+So for model `appz/tracker` the expected format is `appz_tracker/KEY_NAME`.
+
+OpenWebUI normalises the header before forwarding via `sanitize_vault_keys_header()` in `vault.py`:
+- `^KEY_NAME` — COMMON scope, passed through unchanged
+- `appz/tracker_KEY_NAME` — raw model prefix + `_` separator → `appz_tracker/KEY_NAME`
+- `appz/tracker/KEY_NAME` — slash-separated but unsanitized → `appz_tracker/KEY_NAME`
+- `appz_tracker/KEY_NAME` — already correct, passes through unchanged
 
 ### 2. HashiCorp Vault Integration
 
@@ -139,7 +154,7 @@ Agent connection secrets are stored in and retrieved from HashiCorp Vault (KV v1
 
 | File | Purpose |
 |------|---------|
-| `backend/open_webui/utils/vault.py` | `VaultClient` class; `store/get/delete_agent_connection_from_vault()`; `sanitize_agent_name()` / `sanitize_key_field()` helpers |
+| `backend/open_webui/utils/vault.py` | `VaultClient` class; `store/get/delete_agent_connection_from_vault()`; `sanitize_vault_keys_header()` — normalises `x-ltai-vault-keys` header to `sanitized_model/KEY_NAME` format |
 | `backend/open_webui/routers/agent_connections.py` | REST API for CRUD on Vault-backed agent connection keys; mounted at `/api/v1/agent_connections` |
 | `backend/open_webui/config.py` | `ENABLE_VAULT_INTEGRATION`, `VAULT_URL`, `VAULT_TOKEN`, `VAULT_MOUNT_PATH`, `VAULT_VERSION`, `VAULT_TIMEOUT`, `VAULT_VERIFY_SSL` |
 

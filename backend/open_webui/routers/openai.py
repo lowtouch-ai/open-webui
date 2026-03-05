@@ -58,6 +58,7 @@ from open_webui.utils.misc import (
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.headers import include_user_info_headers
 from open_webui.utils.anthropic import is_anthropic_url, get_anthropic_models
+from open_webui.utils.vault import sanitize_vault_keys_header
 
 log = logging.getLogger(__name__)
 
@@ -181,10 +182,15 @@ async def get_headers_and_cookies(
     if config.get("headers") and isinstance(config.get("headers"), dict):
         headers = {**headers, **config.get("headers")}
 
-    # Forward all x-ltai-* headers from the incoming request upstream
+    # Forward all x-ltai-* headers from the incoming request upstream.
+    # Normalise x-ltai-vault-keys so the agent name uses sanitized_model/KEY format.
+    model = metadata.get("model") if metadata else None
     for k, v in request.headers.items():
         if k.lower().startswith("x-ltai-"):
-            headers[k] = v
+            if k.lower() == "x-ltai-vault-keys" and model:
+                headers[k] = sanitize_vault_keys_header(v, model)
+            else:
+                headers[k] = v
 
     return headers, cookies
 

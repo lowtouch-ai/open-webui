@@ -18,6 +18,7 @@ from aiocache import cached
 import requests
 
 from open_webui.utils.headers import include_user_info_headers
+from open_webui.utils.vault import sanitize_vault_keys_header
 from open_webui.models.chats import Chats
 from open_webui.models.users import UserModel
 
@@ -1396,10 +1397,16 @@ async def generate_chat_completion(
     prefix_id = api_config.get("prefix_id", None)
     if prefix_id:
         payload["model"] = payload["model"].replace(f"{prefix_id}.", "")
-    # Collect all x-ltai-* headers from the incoming request to forward upstream
-    forwarded_headers = {
-        k: v for k, v in request.headers.items() if k.lower().startswith("x-ltai-")
-    }
+    # Collect all x-ltai-* headers from the incoming request to forward upstream.
+    # Normalise x-ltai-vault-keys so the agent name uses sanitized_model/KEY format.
+    model_for_vault = payload["model"]
+    forwarded_headers = {}
+    for k, v in request.headers.items():
+        if k.lower().startswith("x-ltai-"):
+            if k.lower() == "x-ltai-vault-keys":
+                forwarded_headers[k] = sanitize_vault_keys_header(v, model_for_vault)
+            else:
+                forwarded_headers[k] = v
     log.info(f"[LTAI] forwarding ltai headers to ollama (keys): {list(forwarded_headers.keys())}")
 
     return await send_post_request(

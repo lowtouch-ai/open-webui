@@ -6,6 +6,7 @@ secrets in HashiCorp Vault instead of the local database.
 """
 
 import os
+import re
 import base64
 from typing import Dict, Any, Optional, List, Tuple
 
@@ -294,6 +295,50 @@ def test_vault_connection(
             return False, "Failed to connect to Vault"
     except Exception as e:
         return False, f"Error connecting to Vault: {str(e)}"
+
+
+def sanitize_vault_keys_header(vault_keys_str: str, model: str) -> str:
+    """Normalize the x-ltai-vault-keys header value to the format expected by the agent backend.
+
+    The agent backend derives the agent name by sanitizing the model ID:
+        agent_name = re.sub(r'[^a-zA-Z0-9]', '_', re.match(r'([^:]+)', model).group(1))
+
+    So for model 'appz/tracker' the expected key format is 'appz_tracker/KEY_NAME'.
+
+    Clients may send the key in the raw format '{model}_{KEY_NAME}' (e.g.
+    'appz/tracker_TRACKER_API_KEY'). This function detects both raw and already-sanitized
+    formats and normalises them to 'sanitized_model/KEY_NAME'.
+
+    Keys starting with '^' are COMMON-scope and are left untouched.
+    """
+    if not vault_keys_str or not model:
+        return vault_keys_str
+
+    model_base = re.match(r'([^:]+)', model).group(1)  # strip :tag suffix
+    sanitized_model = re.sub(r'[^a-zA-Z0-9]', '_', model_base)
+
+    result = []
+    for vault_key in vault_keys_str.split(','):
+        vault_key = vault_key.strip()
+        if not vault_key:
+            continue
+        if vault_key.startswith('^'):
+            result.append(vault_key)
+        else:
+            # Case 1: raw model prefix with '_' separator – e.g. 'appz/tracker_KEY_NAME'
+            raw_prefix = model_base + '_'
+            if vault_key.startswith(raw_prefix):
+                key_name = vault_key[len(raw_prefix):]
+                result.append(f"{sanitized_model}/{key_name}")
+            # Case 2: already has '/' separator – sanitize agent-name portion only
+            elif '/' in vault_key:
+                agent_part, key_part = vault_key.rsplit('/', 1)
+                sanitized_agent = re.sub(r'[^a-zA-Z0-9]', '_', agent_part)
+                result.append(f"{sanitized_agent}/{key_part}")
+            else:
+                result.append(vault_key)
+
+    return ','.join(result)
 
 
 def format_secret_key(name: str, user_id: str, agent_id: Optional[str] = None, is_common: bool = False) -> str:
