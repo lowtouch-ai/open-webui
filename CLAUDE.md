@@ -146,7 +146,30 @@ OpenWebUI normalises the header before forwarding via `sanitize_vault_keys_heade
 - `appz/tracker/KEY_NAME` — slash-separated but unsanitized → `appz_tracker/KEY_NAME`
 - `appz_tracker/KEY_NAME` — already correct, passes through unchanged
 
-### 2. HashiCorp Vault Integration
+### 2. ENABLE_TOOLS_FUNCTION_CALLING — Disable Tool Selection Preflight
+
+OpenWebUI 0.6+ sends a non-streaming tool selection preflight to every model before each real chat, even when no tools are configured. The system message is `"Available Tools: [] — Your task is to choose and return the correct tool(s)..."`. This causes DAG-triggering agents (e.g. ClipFoundry) to fire their pipeline on the preflight instead of only on real user messages.
+
+Added `ENABLE_TOOLS_FUNCTION_CALLING` to gate this behaviour. **Default is `False`** (preflight disabled). Set to `True` only if OpenWebUI-registered Python tools are actively used.
+
+**Files changed:**
+
+| File | What was changed |
+|------|-----------------|
+| `backend/open_webui/config.py` | Added `ENABLE_TOOLS_FUNCTION_CALLING` `PersistentConfig` — reads from env, defaults to `False` |
+| `backend/open_webui/main.py` | Imported `ENABLE_TOOLS_FUNCTION_CALLING`; assigned to `app.state.config` |
+| `backend/open_webui/routers/tasks.py` | Added to GET config response, `TaskConfigForm`, POST update handler, and POST response |
+| `backend/open_webui/utils/middleware.py` | Changed `else:` → `elif request.app.state.config.ENABLE_TOOLS_FUNCTION_CALLING:` in the tools handler block |
+
+**Root cause in `middleware.py`:** The `else` branch of `if tools_dict:` (line ~2534) fires when `tools_dict` is empty — meaning `chat_completion_tools_handler` was always called regardless of whether any tools were configured.
+
+**Env var:**
+```
+ENABLE_TOOLS_FUNCTION_CALLING=false   # default — disables preflight
+ENABLE_TOOLS_FUNCTION_CALLING=true    # re-enable if OpenWebUI tools are needed
+```
+
+### 3. HashiCorp Vault Integration
 
 Agent connection secrets are stored in and retrieved from HashiCorp Vault (KV v1) instead of the local database.
 

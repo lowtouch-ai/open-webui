@@ -2099,6 +2099,12 @@ ERROR HANDLING:
 
 Stay consistent, helpful, and easy to listen to."""
 
+ENABLE_TOOLS_FUNCTION_CALLING = PersistentConfig(
+    "ENABLE_TOOLS_FUNCTION_CALLING",
+    "task.tools.enable",
+    os.environ.get("ENABLE_TOOLS_FUNCTION_CALLING", "False").lower() == "true",
+)
+
 TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE = PersistentConfig(
     "TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE",
     "task.tools.prompt_template",

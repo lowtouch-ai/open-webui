@@ -2531,7 +2531,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                     for tool in tools_dict.values()
                 ]
 
-        else:
+        elif request.app.state.config.ENABLE_TOOLS_FUNCTION_CALLING:
             # If the function calling is not native, then call the tools function calling handler
             try:
                 form_data, flags = await chat_completion_tools_handler(
