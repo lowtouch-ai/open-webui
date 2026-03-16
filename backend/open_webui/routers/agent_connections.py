@@ -179,43 +179,45 @@ async def debug_agent_connections(user=Depends(get_admin_user)):
                                     }
 
                                     try:
-                                        # Level 1: list agent folders under users/{user_id}/
+                                        # List agent scopes under users/{user_id}
                                         agent_response = vault_client.client.secrets.kv.v1.list_secrets(
                                             path=f"users/{user_id}",
                                             mount_point=vault_client.mount_path
                                         )
                                         if agent_response and 'data' in agent_response and 'keys' in agent_response['data']:
-                                            for agent_folder in agent_response['data']['keys']:
-                                                agent_scope = agent_folder.rstrip('/')
+                                            for entry in agent_response['data']['keys']:
+                                                if entry.endswith('/'):
+                                                    continue  # skip unexpected folders
+                                                agent_scope = entry
                                                 is_common = (agent_scope == "COMMON")
                                                 agent_id = None if agent_scope in ("COMMON", "default") else agent_scope
 
-                                                # Level 2: list key names under that agent folder
+                                                # Read the flat secret to get field names
                                                 try:
-                                                    key_response = vault_client.client.secrets.kv.v1.list_secrets(
+                                                    secret = vault_client.client.secrets.kv.v1.read_secret(
                                                         path=f"users/{user_id}/{agent_scope}",
                                                         mount_point=vault_client.mount_path
                                                     )
-                                                    if key_response and 'data' in key_response and 'keys' in key_response['data']:
-                                                        for key_name in key_response['data']['keys']:
-                                                            connection_info = {
-                                                                "agent_scope": agent_scope,
-                                                                "key_name": key_name,
-                                                                "is_common": is_common,
-                                                                "agent_id": agent_id
-                                                            }
-                                                            user_debug["connections"].append(connection_info)
-                                                            debug_info["final_connections"].append({
-                                                                "key_id": f"{user_id}|{key_name}|{agent_scope}",
-                                                                "key_name": key_name,
-                                                                "agent_id": agent_id,
-                                                                "is_common": is_common,
-                                                                "user_id": user_id,
-                                                                "user_name": user_info.name if user_info else None,
-                                                                "user_email": user_info.email if user_info else None
-                                                            })
+                                                    fields = secret.get('data', {}) if secret else {}
+                                                    for key_name in fields:
+                                                        connection_info = {
+                                                            "agent_scope": agent_scope,
+                                                            "key_name": key_name,
+                                                            "is_common": is_common,
+                                                            "agent_id": agent_id
+                                                        }
+                                                        user_debug["connections"].append(connection_info)
+                                                        debug_info["final_connections"].append({
+                                                            "key_id": f"{user_id}|{key_name}|{agent_scope}",
+                                                            "key_name": key_name,
+                                                            "agent_id": agent_id,
+                                                            "is_common": is_common,
+                                                            "user_id": user_id,
+                                                            "user_name": user_info.name if user_info else None,
+                                                            "user_email": user_info.email if user_info else None
+                                                        })
                                                 except Exception as e:
-                                                    user_debug.setdefault("key_list_errors", []).append(
+                                                    user_debug.setdefault("key_read_errors", []).append(
                                                         f"{agent_scope}: {e}"
                                                     )
                                     except Exception as e:
@@ -252,7 +254,12 @@ async def get_agent_connections_status(user=Depends(get_verified_user)):
 
 
 def _parse_connections_for_user(vault_client, user_id: str, user_info=None) -> list:
-    """Two-level Vault listing: users/{user_id}/ → agent folders → key names."""
+    """List all agent connections for a user.
+
+    Vault layout: users/{user_id}/{agent_scope}  →  { KEY_NAME: value, ... }
+    Each agent scope is a flat secret (not a folder); we LIST the user path to
+    get scope names, then READ each secret to get the field names.
+    """
     connections = []
     try:
         user_path = f"users/{user_id}"
@@ -263,22 +270,23 @@ def _parse_connections_for_user(vault_client, user_id: str, user_info=None) -> l
         if not (agent_response and 'data' in agent_response and 'keys' in agent_response['data']):
             return connections
 
-        for agent_folder in agent_response['data']['keys']:
-            # Vault returns folder names with a trailing slash
-            agent_scope = agent_folder.rstrip('/')
+        for entry in agent_response['data']['keys']:
+            # Flat secrets have no trailing slash; skip any unexpected folder entries
+            agent_scope = entry.rstrip('/')
+            if entry.endswith('/'):
+                logger.debug(f"Skipping unexpected subfolder {entry} under {user_path}")
+                continue
 
             is_common = (agent_scope == "COMMON")
             agent_id = None if agent_scope in ("COMMON", "default") else agent_scope
 
             try:
-                key_response = vault_client.client.secrets.kv.v1.list_secrets(
+                secret = vault_client.client.secrets.kv.v1.read_secret(
                     path=f"{user_path}/{agent_scope}",
                     mount_point=vault_client.mount_path
                 )
-                if not (key_response and 'data' in key_response and 'keys' in key_response['data']):
-                    continue
-
-                for key_name in key_response['data']['keys']:
+                fields = secret.get('data', {}) if secret else {}
+                for key_name in fields:
                     key_id = f"{user_id}|{key_name}|{agent_scope}"
                     connections.append(AgentConnectionResponse(
                         key_id=key_id,
@@ -291,7 +299,7 @@ def _parse_connections_for_user(vault_client, user_id: str, user_info=None) -> l
                         user_email=user_info.email if user_info else None,
                     ))
             except Exception as e:
-                logger.debug(f"Could not list keys for {user_path}/{agent_scope}: {e}")
+                logger.debug(f"Could not read secret at {user_path}/{agent_scope}: {e}")
 
     except Exception as e:
         logger.debug(f"No agent connections found for user {user_id}: {e}")
