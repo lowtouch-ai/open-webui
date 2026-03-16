@@ -341,61 +341,79 @@ def sanitize_vault_keys_header(vault_keys_str: str, model: str) -> str:
     return ','.join(result)
 
 
-def format_secret_key(name: str, user_id: str, agent_id: Optional[str] = None, is_common: bool = False) -> str:
-    """Format a secret key for Vault using the path structure: users/<user_id>/<agent_name>_<key_name>
-    
+def sanitize_agent_id(agent_id: str) -> str:
+    """Sanitize an agent ID to match the agent backend's naming convention.
+
+    The agent backend derives the agent name as:
+        agent_name = re.sub(r'[^a-zA-Z0-9]', '_', re.match(r'([^:]+)', model).group(1))
+
+    So 'appz/tracker' becomes 'appz_tracker'.
+    """
+    base = re.match(r'([^:]+)', agent_id).group(1)
+    return re.sub(r'[^a-zA-Z0-9]', '_', base)
+
+
+def format_secret_path(user_id: str, agent_id: Optional[str] = None, is_common: bool = False) -> str:
+    """Format the Vault path for an agent's secrets.
+
+    Layout matches the agent backend: users/<user_id>/<sanitized_agent>
+    All keys for an agent are stored as key-value pairs in a single Vault secret.
+
     Args:
-        name: Secret name (key_name)
         user_id: User ID
-        agent_id: Agent ID (agent_name), optional
-        is_common: Whether the secret is common to all agents
-        
+        agent_id: Agent/model ID (e.g. 'appz/tracker'), optional
+        is_common: Whether the secret scope is COMMON
+
     Returns:
-        str: Formatted secret key path
+        str: Vault secret path
     """
     if is_common:
-        # For common connections, use 'common' as the agent name
-        return f"users/{user_id}/common_{name}"
+        return f"users/{user_id}/COMMON"
     elif agent_id:
-        return f"users/{user_id}/{agent_id}_{name}"
+        return f"users/{user_id}/{sanitize_agent_id(agent_id)}"
     else:
-        # If no agent_id specified, use 'default' as the agent name
-        return f"users/{user_id}/default_{name}"
+        return f"users/{user_id}/default"
 
 
 def store_agent_connection_in_vault(connection: Dict[str, Any], user_id: str) -> bool:
     """Store an agent connection in Vault with AES encryption.
-    
+
+    Secrets are stored as a single Vault secret per agent at
+    users/<user_id>/<sanitized_agent> with all keys as dict entries:
+        { "KEY_NAME": "encrypted_value", ... }
+
     Args:
         connection: Agent connection data
         user_id: User ID for the path structure
-        
+
     Returns:
         bool: True if successful, False otherwise
     """
     if not ENABLE_VAULT_INTEGRATION:
         return False
-    
+
     client = get_vault_client()
     if not client:
         return False
-    
+
     name = connection.get("name")
     value = connection.get("value")
     is_common = connection.get("is_common", False)
     agent_id = connection.get("agent_id")
-    
+
     if not name or value is None:
         return False
-    
+
     try:
-        # Encrypt the value before storing
         encrypted_value = _encrypt_value(str(value))
-        
-        key = format_secret_key(name, user_id, agent_id, is_common)
-        data = {"value": encrypted_value}
-        
-        return client.set_secret(key, data)
+
+        path = format_secret_path(user_id, agent_id, is_common)
+
+        # Read existing secret so we can merge the new key into it
+        existing = client.get_secret(path) or {}
+        existing[name] = encrypted_value
+
+        return client.set_secret(path, existing)
     except Exception as e:
         logger.error(f"Failed to store agent connection in vault: {str(e)}")
         return False
@@ -408,31 +426,30 @@ def get_agent_connection_from_vault(
     agent_id: Optional[str] = None
 ) -> Optional[str]:
     """Get an agent connection from Vault and decrypt it.
-    
+
     Args:
-        name: Secret name
+        name: Secret name (key within the agent secret dict)
         user_id: User ID for the path structure
         is_common: Whether the secret is common to all agents
         agent_id: Agent ID if not common
-        
+
     Returns:
         Optional[str]: Decrypted secret value or None if not found
     """
     if not ENABLE_VAULT_INTEGRATION:
         return None
-    
+
     client = get_vault_client()
     if not client:
         return None
-    
+
     try:
-        key = format_secret_key(name, user_id, agent_id, is_common)
-        secret = client.get_secret(key)
-        
-        if secret and "value" in secret:
-            # Decrypt the value before returning
-            return _decrypt_value(secret["value"])
-        
+        path = format_secret_path(user_id, agent_id, is_common)
+        secret = client.get_secret(path)
+
+        if secret and name in secret:
+            return _decrypt_value(secret[name])
+
         return None
     except Exception as e:
         logger.error(f"Failed to get agent connection from vault: {str(e)}")
@@ -445,27 +462,75 @@ def delete_agent_connection_from_vault(
     is_common: bool = False,
     agent_id: Optional[str] = None
 ) -> bool:
-    """Delete an agent connection from Vault.
-    
+    """Delete an agent connection key from Vault.
+
+    Removes the key from the agent's secret dict. If no keys remain,
+    deletes the entire Vault secret.
+
     Args:
-        name: Secret name
+        name: Secret name (key within the agent secret dict)
         user_id: User ID for the path structure
         is_common: Whether the secret is common to all agents
         agent_id: Agent ID if not common
-        
+
     Returns:
         bool: True if successful, False otherwise
     """
     if not ENABLE_VAULT_INTEGRATION:
         return False
-    
+
     client = get_vault_client()
     if not client:
         return False
-    
+
     try:
-        key = format_secret_key(name, user_id, agent_id, is_common)
-        return client.delete_secret(key)
+        path = format_secret_path(user_id, agent_id, is_common)
+        existing = client.get_secret(path)
+
+        if not existing or name not in existing:
+            return True  # Key doesn't exist, nothing to delete
+
+        del existing[name]
+
+        if existing:
+            # Other keys remain — write back the reduced dict
+            return client.set_secret(path, existing)
+        else:
+            # No keys left — delete the whole secret
+            return client.delete_secret(path)
     except Exception as e:
         logger.error(f"Failed to delete agent connection from vault: {str(e)}")
         return False
+
+
+def list_agent_keys_from_vault(
+    user_id: str,
+    agent_id: Optional[str] = None,
+    is_common: bool = False
+) -> List[str]:
+    """List all key names stored for an agent in Vault.
+
+    Args:
+        user_id: User ID
+        agent_id: Agent/model ID
+        is_common: Whether to list COMMON scope keys
+
+    Returns:
+        List[str]: Key names
+    """
+    if not ENABLE_VAULT_INTEGRATION:
+        return []
+
+    client = get_vault_client()
+    if not client:
+        return []
+
+    try:
+        path = format_secret_path(user_id, agent_id, is_common)
+        secret = client.get_secret(path)
+        if secret:
+            return list(secret.keys())
+        return []
+    except Exception as e:
+        logger.error(f"Failed to list agent keys from vault: {str(e)}")
+        return []

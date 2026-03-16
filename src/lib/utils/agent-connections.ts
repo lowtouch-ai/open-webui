@@ -1,6 +1,16 @@
 import { listAgentConnections, type AgentConnection } from '$lib/apis/agent-connections';
 
 /**
+ * Sanitize an agent ID to match the agent backend's naming convention.
+ * Mirrors the Python: re.sub(r'[^a-zA-Z0-9]', '_', model.split(':')[0])
+ * e.g. 'appz/tracker:0.4g' -> 'appz_tracker'
+ */
+export function sanitizeAgentId(agentId: string): string {
+	const base = agentId.split(':')[0];
+	return base.replace(/[^a-zA-Z0-9]/g, '_');
+}
+
+/**
  * Build vault keys header from agent connections
  * @param agentId - Optional agent ID to filter connections
  * @returns Promise<string | null> - Comma-separated vault keys or null if none
@@ -14,23 +24,26 @@ export async function buildVaultKeysHeader(agentId?: string): Promise<string | n
 
 		if (connections.length === 0) return null;
 
+		// Sanitize the incoming agentId so it matches the sanitized agent_id
+		// returned by the backend (which stores sanitized names in Vault)
+		const sanitizedAgentId = agentId ? sanitizeAgentId(agentId) : undefined;
+
 		// Filter connections based on agent ID with priority system
-		const relevantConnections = connections.filter(conn => {
-			// If agent ID is provided, prioritize agent-specific connections
-			if (agentId) {
-				// Include connections specifically for this agent
-				if (conn.agent_id === agentId) return true;
-				
+		const relevantConnections = connections.filter((conn) => {
+			if (sanitizedAgentId) {
+				// conn.agent_id is already sanitized by the backend
+				if (conn.agent_id === sanitizedAgentId) return true;
+
 				// Include common connections
 				if (conn.is_common) return true;
-				
+
 				// Include connections with no agent_id (legacy - available to all)
 				if (!conn.agent_id && !conn.is_common) return true;
 			} else {
 				// No agent ID provided - include common connections and those without agent_id
 				if (conn.is_common || !conn.agent_id) return true;
 			}
-			
+
 			return false;
 		});
 
@@ -39,32 +52,35 @@ export async function buildVaultKeysHeader(agentId?: string): Promise<string | n
 		// Sort connections to prioritize agent-specific over common
 		const sortedConnections = relevantConnections.sort((a, b) => {
 			// Agent-specific connections first
-			if (agentId && a.agent_id === agentId && b.agent_id !== agentId) return -1;
-			if (agentId && b.agent_id === agentId && a.agent_id !== agentId) return 1;
-			
+			if (sanitizedAgentId && a.agent_id === sanitizedAgentId && b.agent_id !== sanitizedAgentId)
+				return -1;
+			if (sanitizedAgentId && b.agent_id === sanitizedAgentId && a.agent_id !== sanitizedAgentId)
+				return 1;
+
 			// Common connections next
 			if (a.is_common && !b.is_common) return 1;
 			if (b.is_common && !a.is_common) return -1;
-			
+
 			// Alphabetical by key name
 			return a.key_name.localeCompare(b.key_name);
 		});
 
-		// Build the header value in format: agentId_key1,COMMON_key2
-		const vaultKeys = sortedConnections.map(conn => {
-			// Use COMMON prefix for common connections
+		// Build the header value in format expected by agent backend:
+		//   agent-specific: sanitized_agent/KEY_NAME
+		//   common:         COMMON/KEY_NAME
+		const vaultKeys = sortedConnections.map((conn) => {
 			if (conn.is_common) {
-				return `COMMON_${conn.key_name}`;
+				return `COMMON/${conn.key_name}`;
 			}
-			
-			// Use agent ID prefix for agent-specific connections
+
 			if (conn.agent_id) {
-				return `${conn.agent_id}_${conn.key_name}`;
+				// conn.agent_id is already sanitized by the backend
+				return `${conn.agent_id}/${conn.key_name}`;
 			}
-			
+
 			// Fallback for legacy connections without agent_id
-			const prefix = agentId || 'GENERAL';
-			return `${prefix}_${conn.key_name}`;
+			const prefix = sanitizedAgentId || 'GENERAL';
+			return `${prefix}/${conn.key_name}`;
 		});
 
 		return vaultKeys.join(',');
@@ -85,11 +101,9 @@ export function extractAgentIdFromModel(model: Record<string, unknown>): string 
 	// Check model meta for agent_id
 	const info = model.info as Record<string, unknown> | undefined;
 	const meta = model.meta as Record<string, unknown> | undefined;
-	
-	const agentId = 
-		(info?.meta as Record<string, unknown>)?.agent_id || 
-		meta?.agent_id || 
-		model.agent_id;
+
+	const agentId =
+		(info?.meta as Record<string, unknown>)?.agent_id || meta?.agent_id || model.agent_id;
 
 	if (typeof agentId === 'string') return agentId;
 
@@ -103,4 +117,4 @@ export function extractAgentIdFromModel(model: Record<string, unknown>): string 
 	}
 
 	return null;
-} 
+}
