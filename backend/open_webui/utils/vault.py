@@ -341,26 +341,36 @@ def sanitize_vault_keys_header(vault_keys_str: str, model: str) -> str:
     return ','.join(result)
 
 
+def sanitize_agent_id(agent_id: str) -> str:
+    """Sanitize an agent ID for use as a Vault path component.
+
+    Replaces any character that is not alphanumeric with '_', matching the
+    same derivation used by the agent backend.
+    """
+    return re.sub(r'[^a-zA-Z0-9]', '_', agent_id)
+
+
 def format_secret_key(name: str, user_id: str, agent_id: Optional[str] = None, is_common: bool = False) -> str:
-    """Format a secret key for Vault using the path structure: users/<user_id>/<agent_name>_<key_name>
-    
+    """Format a secret key for Vault using the path structure:
+        users/<user_id>/COMMON/<key_name>          (common scope)
+        users/<user_id>/<sanitized_agent>/<key_name>  (agent-specific)
+        users/<user_id>/default/<key_name>         (no agent)
+
     Args:
         name: Secret name (key_name)
         user_id: User ID
         agent_id: Agent ID (agent_name), optional
         is_common: Whether the secret is common to all agents
-        
+
     Returns:
         str: Formatted secret key path
     """
     if is_common:
-        # For common connections, use 'common' as the agent name
-        return f"users/{user_id}/common_{name}"
+        return f"users/{user_id}/COMMON/{name}"
     elif agent_id:
-        return f"users/{user_id}/{agent_id}_{name}"
+        return f"users/{user_id}/{sanitize_agent_id(agent_id)}/{name}"
     else:
-        # If no agent_id specified, use 'default' as the agent name
-        return f"users/{user_id}/default_{name}"
+        return f"users/{user_id}/default/{name}"
 
 
 def store_agent_connection_in_vault(connection: Dict[str, Any], user_id: str) -> bool:
