@@ -425,8 +425,8 @@
 
 							// Extract agent ID from model for vault keys
 							const { extractAgentIdFromModel } = await import('$lib/utils/agent-connections');
-							const model = $models.find(m => m.id === form_data.model);
-							const agentId = extractAgentIdFromModel(model);
+							const modelItem = $models.find(m => m.id === form_data.model);
+							const agentId = extractAgentIdFromModel(modelItem);
 
 							const [res, controller] = await chatCompletion(
 								OPENAI_API_KEY,
