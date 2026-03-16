@@ -297,6 +297,43 @@ def test_vault_connection(
         return False, f"Error connecting to Vault: {str(e)}"
 
 
+def sanitize_agent_name(agent_identifier: Optional[str]) -> str:
+    """Normalize an agent/model identifier to an underscore-safe name.
+
+    Rule:
+      - If the identifier contains a colon, take the substring BEFORE the first colon.
+      - Replace all non-alphanumeric characters with underscores ('_').
+      - Collapse consecutive non-alphanumerics into a single underscore.
+      - Trim leading/trailing underscores.
+      - If result is empty, fall back to "default".
+
+    Examples:
+      - "webshop-email:0.5" -> "webshop_email"
+      - "webshop/hr:0.3" -> "webshop_hr"
+      - "webshop@special#chars:1.0" -> "webshop_special_chars"
+    """
+    if not agent_identifier:
+        return "default"
+    ident = str(agent_identifier)
+    if ":" in ident:
+        ident = ident.split(":", 1)[0]
+    normalized = re.sub(r"[^A-Za-z0-9]+", "_", ident).strip("_")
+    return normalized if normalized else "default"
+
+
+def sanitize_key_field(key: str) -> str:
+    """Sanitize a secret field (key name) to match storage and filtering rules.
+
+    Rules:
+      - Drop anything after the first ':' (exclusive).
+      - Replace '/' and '\\' with '_'.
+    """
+    if key is None:
+        return key
+    head = key.split(":", 1)[0]
+    return head.replace("/", "_").replace("\\", "_")
+
+
 def sanitize_vault_keys_header(vault_keys_str: str, model: str) -> str:
     """Normalize the x-ltai-vault-keys header value to the format expected by the agent backend.
 

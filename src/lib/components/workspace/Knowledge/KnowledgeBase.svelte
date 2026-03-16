@@ -312,6 +312,8 @@
 
 			const uploadedFile = await uploadFile(localStorage.token, file, metadata).catch((e) => {
 				toast.error(`${e}`);
+				// Remove the failed file from the list
+				knowledge.files = knowledge.files.filter((item) => item.itemId !== tempItemId);
 				return null;
 			});
 
@@ -331,11 +333,16 @@
 				} else {
 					await addFileHandler(uploadedFile.id);
 				}
+
 			} else {
 				toast.error($i18n.t('Failed to upload file.'));
+				// Remove the failed file from the list
+				knowledge.files = knowledge.files.filter((item) => item.itemId !== tempItemId);
 			}
 		} catch (e) {
 			toast.error(`${e}`);
+			// Remove the failed file from the list
+			knowledge.files = knowledge.files.filter((item) => item.itemId !== tempItemId);
 		}
 	};
 

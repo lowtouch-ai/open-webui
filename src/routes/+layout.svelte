@@ -47,6 +47,7 @@
 	import { getSessionUser, userSignOut } from '$lib/apis/auths';
 	import { getAllTags, getChatList } from '$lib/apis/chats';
 	import { chatCompletion } from '$lib/apis/openai';
+	import { installClientTimeHeadersFetchPatch } from '$lib/utils/installClientTimeHeadersFetchPatch';
 
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL, WEBUI_HOSTNAME } from '$lib/constants';
 	import { bestMatchingLanguage } from '$lib/utils';
@@ -421,10 +422,16 @@
 								form_data['model'] = form_data['model'].replace(`${prefixId}.`, ``);
 							}
 
+							// Extract agent ID from model for vault keys
+							const { extractAgentIdFromModel } = await import('$lib/utils/agent-connections');
+							const model = $models.find(m => m.id === form_data.model);
+							const agentId = extractAgentIdFromModel(model);
+
 							const [res, controller] = await chatCompletion(
 								OPENAI_API_KEY,
 								form_data,
-								OPENAI_API_URL
+								OPENAI_API_URL,
+								agentId
 							);
 
 							if (res) {
@@ -670,6 +677,9 @@
 				window.applyTheme();
 			}
 		}
+
+		// Attach client time/timezone headers to WebUI API requests
+		installClientTimeHeadersFetchPatch();
 
 		if (window?.electronAPI) {
 			const info = await window.electronAPI.send({

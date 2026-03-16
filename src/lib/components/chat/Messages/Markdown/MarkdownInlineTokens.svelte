@@ -14,6 +14,7 @@
 	import Image from '$lib/components/common/Image.svelte';
 	import KatexRenderer from './KatexRenderer.svelte';
 	import Source from './Source.svelte';
+	import AudioPlayer from './AudioPlayer.svelte';
 	import HtmlToken from './HTMLToken.svelte';
 	import TextToken from './MarkdownInlineTokens/TextToken.svelte';
 	import CodespanToken from './MarkdownInlineTokens/CodespanToken.svelte';
@@ -65,6 +66,26 @@
 			// Invalid URL, let browser handle it
 		}
 	};
+
+	// Function to check if a URL is an audio file
+	const isAudioUrl = (url: string): boolean => {
+		const audioExtensions = ['.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac', '.wma'];
+		const urlLower = url.toLowerCase();
+		const isAudio = audioExtensions.some(ext => urlLower.includes(ext)) || urlLower.includes('/audio/');
+		return isAudio;
+	};
+
+	// Function to extract filename from URL for audio title
+	const getAudioTitle = (url: string): string => {
+		try {
+			const urlObj = new URL(url);
+			const pathname = urlObj.pathname;
+			const filename = pathname.split('/').pop() || '';
+			return filename.replace(/\.[^/.]+$/, ''); // Remove extension
+		} catch {
+			return 'Audio';
+		}
+	};
 </script>
 
 {#each tokens as token, tokenIdx (tokenIdx)}
@@ -76,6 +97,12 @@
 		{@const noteId = getNoteIdFromHref(token.href)}
 		{#if noteId}
 			<NoteLinkToken {noteId} href={token.href} />
+		{:else if isAudioUrl(token.href)}
+			<AudioPlayer
+				src={token.href}
+				title={getAudioTitle(token.href)}
+				className="inline-block"
+			/>
 		{:else if token.tokens}
 			<a
 				href={token.href}
@@ -102,7 +129,23 @@
 	{:else if token.type === 'em'}
 		<em><svelte:self id={`${id}-em`} tokens={token.tokens} {onSourceClick} /></em>
 	{:else if token.type === 'codespan'}
-		<CodespanToken {token} {done} />
+		{#if isAudioUrl(unescapeHtml(token.text))}
+			<AudioPlayer 
+				src={unescapeHtml(token.text)} 
+				title={getAudioTitle(unescapeHtml(token.text))}
+				className="inline-block"
+			/>
+		{:else}
+			<!-- svelte-ignore a11y-click-events-have-key-events -->
+			<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+			<code
+				class="codespan cursor-pointer"
+				on:click={() => {
+					copyToClipboard(unescapeHtml(token.text));
+					toast.success($i18n.t('Copied to clipboard'));
+				}}>{unescapeHtml(token.text)}</code
+			>
+		{/if}
 	{:else if token.type === 'br'}
 		<br />
 	{:else if token.type === 'del'}
