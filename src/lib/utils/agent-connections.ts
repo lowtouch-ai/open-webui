@@ -1,6 +1,15 @@
 import { listAgentConnections, type AgentConnection } from '$lib/apis/agent-connections';
 
 /**
+ * Sanitize an agent ID to match the backend's Vault path component format.
+ * Replaces any non-alphanumeric character with '_', identical to the agent
+ * backend derivation and vault.py's sanitize_agent_id().
+ */
+function sanitizeAgentId(id: string): string {
+	return id.replace(/[^a-zA-Z0-9]/g, '_');
+}
+
+/**
  * Build vault keys header from agent connections
  * @param agentId - Optional agent ID to filter connections
  * @returns Promise<string | null> - Comma-separated vault keys or null if none
@@ -14,57 +23,44 @@ export async function buildVaultKeysHeader(agentId?: string): Promise<string | n
 
 		if (connections.length === 0) return null;
 
+		// The backend returns agent_id as the sanitized Vault folder name (e.g. "appz_tracker").
+		// Compare against the sanitized form of the incoming agentId.
+		const sanitizedAgentId = agentId ? sanitizeAgentId(agentId) : undefined;
+
 		// Filter connections based on agent ID with priority system
 		const relevantConnections = connections.filter(conn => {
-			// If agent ID is provided, prioritize agent-specific connections
-			if (agentId) {
-				// Include connections specifically for this agent
-				if (conn.agent_id === agentId) return true;
-				
-				// Include common connections
+			if (sanitizedAgentId) {
+				if (conn.agent_id === sanitizedAgentId) return true;
 				if (conn.is_common) return true;
-				
-				// Include connections with no agent_id (legacy - available to all)
 				if (!conn.agent_id && !conn.is_common) return true;
 			} else {
-				// No agent ID provided - include common connections and those without agent_id
 				if (conn.is_common || !conn.agent_id) return true;
 			}
-			
 			return false;
 		});
 
 		if (relevantConnections.length === 0) return null;
 
-		// Sort connections to prioritize agent-specific over common
+		// Sort: agent-specific first, then common, then alphabetical
 		const sortedConnections = relevantConnections.sort((a, b) => {
-			// Agent-specific connections first
-			if (agentId && a.agent_id === agentId && b.agent_id !== agentId) return -1;
-			if (agentId && b.agent_id === agentId && a.agent_id !== agentId) return 1;
-			
-			// Common connections next
+			if (sanitizedAgentId && a.agent_id === sanitizedAgentId && b.agent_id !== sanitizedAgentId) return -1;
+			if (sanitizedAgentId && b.agent_id === sanitizedAgentId && a.agent_id !== sanitizedAgentId) return 1;
 			if (a.is_common && !b.is_common) return 1;
 			if (b.is_common && !a.is_common) return -1;
-			
-			// Alphabetical by key name
 			return a.key_name.localeCompare(b.key_name);
 		});
 
-		// Build the header value in format: agentId_key1,COMMON_key2
+		// Build header value: "{sanitized_agent}/{key_name}" or "^{key_name}" for COMMON.
+		// The backend's sanitize_vault_keys_header() handles the "/" format correctly (Case 2).
 		const vaultKeys = sortedConnections.map(conn => {
-			// Use COMMON prefix for common connections
 			if (conn.is_common) {
-				return `COMMON_${conn.key_name}`;
+				return `^${conn.key_name}`;
 			}
-			
-			// Use agent ID prefix for agent-specific connections
 			if (conn.agent_id) {
-				return `${conn.agent_id}_${conn.key_name}`;
+				return `${conn.agent_id}/${conn.key_name}`;
 			}
-			
-			// Fallback for legacy connections without agent_id
-			const prefix = agentId || 'GENERAL';
-			return `${prefix}_${conn.key_name}`;
+			const prefix = sanitizedAgentId || 'GENERAL';
+			return `${prefix}/${conn.key_name}`;
 		});
 
 		return vaultKeys.join(',');

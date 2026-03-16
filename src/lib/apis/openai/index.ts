@@ -1,4 +1,6 @@
 import { OPENAI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+import { get } from 'svelte/store';
+import { user } from '$lib/stores';
 
 export const getOpenAIConfig = async (token: string = '') => {
 	let error = null;
@@ -342,15 +344,18 @@ export const chatCompletion = async (
 	// Build vault keys header for agent connections
 	const { buildVaultKeysHeader } = await import('$lib/utils/agent-connections');
 	const vaultKeys = await buildVaultKeysHeader(agentId);
+	const currentUser = get(user);
 
 	const headers: Record<string, string> = {
 		Authorization: `Bearer ${token}`,
 		'Content-Type': 'application/json'
 	};
 
-	// Add vault keys header if we have connections
 	if (vaultKeys) {
 		headers['X-LTAI-Vault-Keys'] = vaultKeys;
+	}
+	if (currentUser?.id) {
+		headers['X-LTAI-Vault-User'] = currentUser.id;
 	}
 
 	const res = await fetch(`${url}/chat/completions`, {
@@ -382,15 +387,18 @@ export const generateOpenAIChatCompletion = async (
 	// Build vault keys header for agent connections
 	const { buildVaultKeysHeader } = await import('$lib/utils/agent-connections');
 	const vaultKeys = await buildVaultKeysHeader(agentId);
+	const currentUser = get(user);
 
 	const headers: Record<string, string> = {
 		Authorization: `Bearer ${token}`,
 		'Content-Type': 'application/json'
 	};
 
-	// Add vault keys header if we have connections
 	if (vaultKeys) {
 		headers['X-LTAI-Vault-Keys'] = vaultKeys;
+	}
+	if (currentUser?.id) {
+		headers['X-LTAI-Vault-User'] = currentUser.id;
 	}
 
 	const res = await fetch(`${url}/chat/completions`, {
