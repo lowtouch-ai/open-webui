@@ -83,7 +83,7 @@ export async function buildVaultKeysHeader(agentId?: string): Promise<string | n
 			return `${prefix}/${conn.key_name}`;
 		});
 
-		return vaultKeys.join(',');
+		return [...new Set(vaultKeys)].join(',');
 	} catch (error) {
 		console.error('Error building vault keys header:', error);
 		return null;

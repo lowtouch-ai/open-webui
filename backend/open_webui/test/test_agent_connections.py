@@ -10,8 +10,6 @@ from open_webui.utils.vault import (
     delete_agent_connection_from_vault,
     format_secret_path,
     sanitize_agent_id,
-    _encrypt_value,
-    _decrypt_value
 )
 
 
@@ -65,15 +63,6 @@ class TestFormatSecretPath:
 class TestVaultUtils:
     """Test Vault utility functions."""
 
-    def test_encrypt_decrypt_value(self):
-        """Test encryption and decryption of values."""
-        original_value = "test-secret-value"
-        encrypted = _encrypt_value(original_value)
-        decrypted = _decrypt_value(encrypted)
-
-        assert decrypted == original_value
-        assert encrypted != original_value
-
     @patch('open_webui.utils.vault.ENABLE_VAULT_INTEGRATION', False)
     def test_store_connection_vault_disabled(self):
         """Test storing connection when Vault is disabled."""
@@ -91,8 +80,7 @@ class TestVaultUtils:
     def test_store_connection_merges_into_existing(self, mock_get_client):
         """Test that storing a key merges it into the existing agent secret."""
         mock_client = MagicMock()
-        existing_encrypted = _encrypt_value("old_value")
-        mock_client.get_secret.return_value = {"EXISTING_KEY": existing_encrypted}
+        mock_client.get_secret.return_value = {"EXISTING_KEY": "old_value"}
         mock_client.set_secret.return_value = True
         mock_get_client.return_value = mock_client
 
@@ -141,8 +129,7 @@ class TestVaultUtils:
     def test_get_connection_success(self, mock_get_client):
         """Test successful connection retrieval."""
         mock_client = MagicMock()
-        encrypted_value = _encrypt_value("test_value")
-        mock_client.get_secret.return_value = {"test_key": encrypted_value}
+        mock_client.get_secret.return_value = {"test_key": "test_value"}
         mock_get_client.return_value = mock_client
 
         result = get_agent_connection_from_vault("test_key", "user123", agent_id="agent123")
@@ -155,8 +142,7 @@ class TestVaultUtils:
     def test_get_connection_with_slash_agent(self, mock_get_client):
         """Test retrieval for an agent with slash in its name."""
         mock_client = MagicMock()
-        encrypted_value = _encrypt_value("tracker_secret")
-        mock_client.get_secret.return_value = {"API_KEY": encrypted_value}
+        mock_client.get_secret.return_value = {"API_KEY": "tracker_secret"}
         mock_get_client.return_value = mock_client
 
         result = get_agent_connection_from_vault("API_KEY", "user123", agent_id="appz/tracker")
@@ -169,9 +155,7 @@ class TestVaultUtils:
     def test_delete_removes_key_from_dict(self, mock_get_client):
         """Test that deleting a key removes it from the agent secret dict."""
         mock_client = MagicMock()
-        enc_val1 = _encrypt_value("val1")
-        enc_val2 = _encrypt_value("val2")
-        mock_client.get_secret.return_value = {"KEY1": enc_val1, "KEY2": enc_val2}
+        mock_client.get_secret.return_value = {"KEY1": "val1", "KEY2": "val2"}
         mock_client.set_secret.return_value = True
         mock_get_client.return_value = mock_client
 
@@ -191,8 +175,7 @@ class TestVaultUtils:
     def test_delete_last_key_removes_secret(self, mock_get_client):
         """Test that deleting the last key deletes the entire Vault secret."""
         mock_client = MagicMock()
-        enc_val = _encrypt_value("val1")
-        mock_client.get_secret.return_value = {"ONLY_KEY": enc_val}
+        mock_client.get_secret.return_value = {"ONLY_KEY": "val1"}
         mock_client.delete_secret.return_value = True
         mock_get_client.return_value = mock_client
 

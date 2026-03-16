@@ -376,11 +376,14 @@ def format_secret_path(user_id: str, agent_id: Optional[str] = None, is_common: 
 
 
 def store_agent_connection_in_vault(connection: Dict[str, Any], user_id: str) -> bool:
-    """Store an agent connection in Vault with AES encryption.
+    """Store an agent connection in Vault as plain text.
+
+    Values are stored unencrypted so the agent backend can read them
+    directly.  Vault itself provides the security envelope.
 
     Secrets are stored as a single Vault secret per agent at
     users/<user_id>/<sanitized_agent> with all keys as dict entries:
-        { "KEY_NAME": "encrypted_value", ... }
+        { "KEY_NAME": "plain_value", ... }
 
     Args:
         connection: Agent connection data
@@ -405,13 +408,11 @@ def store_agent_connection_in_vault(connection: Dict[str, Any], user_id: str) ->
         return False
 
     try:
-        encrypted_value = _encrypt_value(str(value))
-
         path = format_secret_path(user_id, agent_id, is_common)
 
         # Read existing secret so we can merge the new key into it
         existing = client.get_secret(path) or {}
-        existing[name] = encrypted_value
+        existing[name] = str(value)
 
         return client.set_secret(path, existing)
     except Exception as e:
@@ -425,7 +426,7 @@ def get_agent_connection_from_vault(
     is_common: bool = False,
     agent_id: Optional[str] = None
 ) -> Optional[str]:
-    """Get an agent connection from Vault and decrypt it.
+    """Get an agent connection from Vault.
 
     Args:
         name: Secret name (key within the agent secret dict)
@@ -434,7 +435,7 @@ def get_agent_connection_from_vault(
         agent_id: Agent ID if not common
 
     Returns:
-        Optional[str]: Decrypted secret value or None if not found
+        Optional[str]: Secret value or None if not found
     """
     if not ENABLE_VAULT_INTEGRATION:
         return None
@@ -448,7 +449,7 @@ def get_agent_connection_from_vault(
         secret = client.get_secret(path)
 
         if secret and name in secret:
-            return _decrypt_value(secret[name])
+            return secret[name]
 
         return None
     except Exception as e:
