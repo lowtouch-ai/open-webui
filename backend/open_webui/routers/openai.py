@@ -83,7 +83,7 @@ async def send_get_request(url, key=None, user: UserModel = None):
 
             async with session.get(
                 url,
-                headers=headers,
+                headers={**headers, "Accept-Encoding": "gzip, deflate"},
                 ssl=AIOHTTP_CLIENT_SESSION_SSL,
             ) as response:
                 return await response.json()
@@ -609,7 +609,7 @@ async def get_models(
                 else:
                     async with session.get(
                         f"{url}/models",
-                        headers=headers,
+                        headers={**headers, "Accept-Encoding": "gzip, deflate"},
                         cookies=cookies,
                         ssl=AIOHTTP_CLIENT_SESSION_SSL,
                     ) as r:
