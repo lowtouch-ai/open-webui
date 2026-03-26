@@ -681,6 +681,7 @@ async def verify_connection(
     async with aiohttp.ClientSession(
         trust_env=True,
         timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST),
+        headers={"Accept-Encoding": "gzip, deflate"},
     ) as session:
         try:
             headers, cookies = await get_headers_and_cookies(
@@ -696,7 +697,7 @@ async def verify_connection(
                 api_version = api_config.get("api_version", "") or "2023-03-15-preview"
                 async with session.get(
                     url=f"{url}/openai/models?api-version={api_version}",
-                    headers=headers,
+                    headers={**headers, "Accept-Encoding": "gzip, deflate"},
                     cookies=cookies,
                     ssl=AIOHTTP_CLIENT_SESSION_SSL,
                 ) as r:
@@ -728,7 +729,7 @@ async def verify_connection(
             else:
                 async with session.get(
                     f"{url}/models",
-                    headers=headers,
+                    headers={**headers, "Accept-Encoding": "gzip, deflate"},
                     cookies=cookies,
                     ssl=AIOHTTP_CLIENT_SESSION_SSL,
                 ) as r:
