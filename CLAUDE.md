@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Open WebUI is a self-hosted AI platform (v0.8.5) supporting Ollama and OpenAI-compatible APIs with RAG, web search, and tool-use capabilities. It is a full-stack app: **SvelteKit frontend** + **FastAPI backend**.
+Open WebUI is a self-hosted AI platform (v0.12.0) supporting Ollama and OpenAI-compatible APIs with RAG, web search, and tool-use capabilities. It is a full-stack app: **SvelteKit frontend** + **FastAPI backend**.
 
 ## Commands
 
@@ -116,6 +116,8 @@ These features are maintained in this fork and must be re-applied whenever synci
 
 ### 1. X-LTAI Header Forwarding
 
+> **v0.12.0 note:** Ollama and OpenAI routers now share `get_headers_and_cookies()` in `backend/open_webui/utils/headers.py`. The `x-ltai-*` forwarding (with `sanitize_vault_keys_header()`) and the `Accept-Encoding: gzip, deflate` (no brotli) header now live there, so the per-router changes listed below no longer exist. `main.py` still adds `vault_user_id`, `vault_keys`, `ltai_headers` to `metadata`; the model id is read from `metadata['model']['id']`.
+
 All request headers starting with `x-ltai-` are extracted from the incoming chat request and forwarded to every upstream LLM provider (Ollama and OpenAI-compatible).
 
 **Files changed:**
@@ -148,6 +150,8 @@ OpenWebUI normalises the header before forwarding via `sanitize_vault_keys_heade
 
 ### 2. ENABLE_TOOLS_FUNCTION_CALLING — Disable Tool Selection Preflight
 
+> **v0.12.0 note:** Not re-applied. Upstream now only runs the tool preflight when `tools_dict` is non-empty, so the empty-tools preflight this flag disabled no longer happens. The `config.py` entry (config is now DB-backed via `Config`) was dropped.
+
 OpenWebUI 0.6+ sends a non-streaming tool selection preflight to every model before each real chat, even when no tools are configured. The system message is `"Available Tools: [] — Your task is to choose and return the correct tool(s)..."`. This causes DAG-triggering agents (e.g. ClipFoundry) to fire their pipeline on the preflight instead of only on real user messages.
 
 Added `ENABLE_TOOLS_FUNCTION_CALLING` to gate this behaviour. **Default is `False`** (preflight disabled). Set to `True` only if OpenWebUI-registered Python tools are actively used.
@@ -179,7 +183,7 @@ Agent connection secrets are stored in and retrieved from HashiCorp Vault (KV v1
 |------|---------|
 | `backend/open_webui/utils/vault.py` | `VaultClient` class; `store/get/delete_agent_connection_from_vault()`; `sanitize_vault_keys_header()` — normalises `x-ltai-vault-keys` header to `sanitized_model/KEY_NAME` format |
 | `backend/open_webui/routers/agent_connections.py` | REST API for CRUD on Vault-backed agent connection keys; mounted at `/api/v1/agent_connections` |
-| `backend/open_webui/config.py` | `ENABLE_VAULT_INTEGRATION`, `VAULT_URL`, `VAULT_TOKEN`, `VAULT_MOUNT_PATH`, `VAULT_VERSION`, `VAULT_TIMEOUT`, `VAULT_VERIFY_SSL` |
+| `backend/open_webui/config.py` | (v0.12.0: vault settings are read from env directly in `utils/vault.py`) `ENABLE_VAULT_INTEGRATION`, `VAULT_URL`, `VAULT_TOKEN`, `VAULT_MOUNT_PATH`, `VAULT_VERSION`, `VAULT_TIMEOUT`, `VAULT_VERIFY_SSL` |
 
 **Vault secret layout:** `users/<user_id>/<agent_name>` → `{ <key_name>: <value> }`
 `COMMON` scope: `users/<user_id>/COMMON`

@@ -4,7 +4,7 @@
 
 	import { getContext, onMount, tick } from 'svelte';
 
-	import { formatFileSize, getLineCount } from '$lib/utils';
+	import { formatFileSize, getLineCount, safeLinkUrl } from '$lib/utils';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { settings } from '$lib/stores';
 	import { getKnowledgeById } from '$lib/apis/knowledge';
@@ -13,7 +13,7 @@
 	import CodeBlock from '$lib/components/chat/Messages/CodeBlock.svelte';
 	import Markdown from '$lib/components/chat/Messages/Markdown.svelte';
 
-	const i18n = getContext('i18n');
+	const i18n: any = getContext('i18n');
 
 	const CONTENT_PREVIEW_LIMIT = 10000;
 	let expandedContent = false;
@@ -24,6 +24,11 @@
 	import Tooltip from './Tooltip.svelte';
 	import dayjs from 'dayjs';
 	import Spinner from './Spinner.svelte';
+	import PDFViewer from './PDFViewer.svelte';
+	import PanzoomContainer from './PanzoomContainer.svelte';
+	import DocxPreview from './DocxPreview.svelte';
+	import PptxPreview from './PptxPreview.svelte';
+	import Reset from '../icons/Reset.svelte';
 
 	export let item;
 	export let show = false;
@@ -36,14 +41,30 @@
 	let isAudio = false;
 	let isImage = false;
 	let isExcel = false;
+	let isDocx = false;
+	let isPptx = false;
 
 	let selectedTab = '';
 	let excelWorkbook: WorkBook | null = null;
 	let excelSheetNames: string[] = [];
 	let selectedSheet = '';
 	let excelHtml = '';
-	let excelError = '';
+	let excelError = false;
 	let rowCount = 0;
+
+	// DOCX state
+	let docxData: ArrayBuffer | null = null;
+	let docxError = false;
+
+	// PPTX state
+	let pptxSlides: string[] = [];
+	let pptxCurrentSlide = 0;
+	let pptxError = false;
+
+	let panzoomRef: PanzoomContainer;
+	const resetImageView = () => {
+		panzoomRef?.reset();
+	};
 
 	$: isPDF =
 		item?.meta?.content_type === 'application/pdf' ||
@@ -107,9 +128,19 @@
 				item.name.toLowerCase().endsWith('.xlsx') ||
 				item.name.toLowerCase().endsWith('.csv')));
 
+	$: isDocx =
+		item?.meta?.content_type ===
+			'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+		(item?.name && item.name.toLowerCase().endsWith('.docx'));
+
+	$: isPptx =
+		item?.meta?.content_type ===
+			'application/vnd.openxmlformats-officedocument.presentationml.presentation' ||
+		(item?.name && item.name.toLowerCase().endsWith('.pptx'));
+
 	const loadExcelContent = async () => {
 		try {
-			excelError = '';
+			excelError = false;
 			const [arrayBuffer, { read }] = await Promise.all([
 				getFileContentById(item.id),
 				import('xlsx')
@@ -123,35 +154,53 @@
 			}
 		} catch (error) {
 			console.error('Error loading Excel/CSV file:', error);
-			excelError = $i18n.t('Failed to load Excel/CSV file. Please try downloading it instead.');
+			excelError = true;
 		}
 	};
 
 	const renderExcelSheet = async () => {
 		if (!excelWorkbook || !selectedSheet) return;
-
+		const { excelToTable } = await import('$lib/utils/excelToTable');
 		const worksheet = excelWorkbook.Sheets[selectedSheet];
-		// Calculate row count
-		const XLSX = await import('xlsx');
-		const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1:A1');
-		rowCount = range.e.r - range.s.r + 1;
-
-		excelHtml = DOMPurify.sanitize(
-			XLSX.utils.sheet_to_html(worksheet, {
-				id: 'excel-table',
-				editable: false,
-				header: ''
-			})
-		);
+		const result = await excelToTable(worksheet);
+		excelHtml = DOMPurify.sanitize(result.html);
+		rowCount = result.rowCount;
 	};
 
 	$: if (selectedSheet && excelWorkbook) {
 		renderExcelSheet();
 	}
 
+	const loadDocxContent = async () => {
+		try {
+			docxError = false;
+			docxData = await getFileContentById(item.id);
+		} catch (error) {
+			console.error('Error loading DOCX file:', error);
+			docxError = true;
+		}
+	};
+
+	const loadPptxContent = async () => {
+		try {
+			pptxError = false;
+			const [arrayBuffer, { pptxToImages }] = await Promise.all([
+				getFileContentById(item.id),
+				import('$lib/utils/pptxToHtml')
+			]);
+			const result = await pptxToImages(arrayBuffer);
+			pptxSlides = result.images;
+			pptxCurrentSlide = 0;
+		} catch (error) {
+			console.error('Error loading PPTX file:', error);
+			pptxError = true;
+		}
+	};
+
 	const loadContent = async () => {
 		selectedTab = '';
 		expandedContent = false;
+		docxData = null;
 		if (item?.type === 'collection') {
 			loading = true;
 
@@ -180,6 +229,12 @@
 			if (isExcel) {
 				await loadExcelContent();
 			}
+			if (isDocx) {
+				await loadDocxContent();
+			}
+			if (isPptx) {
+				await loadPptxContent();
+			}
 
 			loading = false;
 		}
@@ -200,21 +255,22 @@
 </script>
 
 <Modal bind:show size="lg">
-	<div class="font-primary px-4.5 py-3.5 w-full flex flex-col justify-center dark:text-gray-400">
+	<div class=" px-4.5 py-3.5 w-full flex flex-col justify-center dark:text-gray-400">
 		<div class=" pb-2">
 			<div class="flex items-start justify-between">
 				<div>
-					<div class=" font-medium text-lg dark:text-gray-100">
+					<div class=" font-normal text-lg dark:text-gray-100">
 						<a
 							href="#"
 							class="hover:underline line-clamp-1"
 							on:click|preventDefault={() => {
-								if (!isPDF && item.url) {
+								if (item.type === 'file' || safeLinkUrl(item.url)) {
+									let fileId = item?.id ?? item?.tempId;
 									window.open(
 										item.type === 'file'
 											? item?.url?.startsWith('http')
 												? item.url
-												: `${WEBUI_API_BASE_URL}/files/${item.url}/content`
+												: `${WEBUI_API_BASE_URL}/files/${fileId}/content`
 											: item.url,
 										'_blank'
 									);
@@ -253,7 +309,9 @@
 
 							{#if item?.created_at}
 								<div class="capitalize shrink-0">
-									{dayjs(item.created_at * 1000).format('LL')}
+									{dayjs(item.created_at * 1000)
+										.locale($i18n.language)
+										.format('LL')}
 								</div>
 							{/if}
 						{/if}
@@ -333,9 +391,9 @@
 					</div>
 				{/if}
 
-				{#if isAudio || isPDF || isExcel || isCode || isMarkdown}
+				{#if isAudio || isPDF || isExcel || isCode || isMarkdown || isDocx || isPptx}
 					<div
-						class="flex mb-2.5 scrollbar-none overflow-x-auto w-full border-b border-gray-50 dark:border-gray-850/30 text-center text-sm font-medium bg-transparent dark:text-gray-200"
+						class="flex mb-2.5 scrollbar-none overflow-x-auto w-full border-b border-gray-50 dark:border-gray-850/30 text-center text-sm font-normal bg-transparent dark:text-gray-200"
 					>
 						<button
 							class="min-w-fit py-1.5 px-4 border-b {selectedTab === ''
@@ -360,13 +418,26 @@
 				{/if}
 
 				{#if isImage}
-					<div class="w-full max-h-[70vh] overflow-auto">
-						<img
-							src={`${WEBUI_API_BASE_URL}/files/${item.id}/content`}
-							alt={item?.name ?? 'Image'}
-							class="w-full object-contain rounded-lg"
-							loading="lazy"
-						/>
+					<div class="relative w-full max-h-[70vh] overflow-hidden">
+						<div class="absolute top-2 right-2 z-10">
+							<Tooltip content={$i18n.t('Reset view')}>
+								<button
+									class="p-1.5 rounded-lg bg-white/80 dark:bg-gray-850/80 backdrop-blur-sm shadow-sm hover:bg-gray-100 dark:hover:bg-gray-800 transition text-gray-500 dark:text-gray-400"
+									on:click={resetImageView}
+								>
+									<Reset className="size-4" />
+								</button>
+							</Tooltip>
+						</div>
+						<PanzoomContainer bind:this={panzoomRef}>
+							<img
+								src={`${WEBUI_API_BASE_URL}/files/${item.id}/content`}
+								alt={item?.name ?? 'Image'}
+								class="w-full object-contain rounded-lg"
+								loading="lazy"
+								draggable="false"
+							/>
+						</PanzoomContainer>
 					</div>
 				{:else if selectedTab === ''}
 					{#if item?.file?.data}
@@ -443,20 +514,19 @@
 							playsinline
 						/>
 					{:else if isPDF}
-						<iframe
-							title={item?.name}
-							src={`${WEBUI_API_BASE_URL}/files/${item.id}/content`}
-							class="w-full h-[70vh] border-0 rounded-lg"
+						<PDFViewer
+							url={`${WEBUI_API_BASE_URL}/files/${item.id}/content`}
+							className="w-full h-[70vh] border-0 rounded-lg"
 						/>
 					{:else if isExcel}
 						{#if excelError}
 							<div class="text-red-500 text-sm p-4">
-								{excelError}
+								{$i18n.t('Failed to load Excel/CSV file. Please try downloading it instead.')}
 							</div>
 						{:else}
 							{#if excelSheetNames.length > 1}
 								<div
-									class="flex mb-2.5 scrollbar-none overflow-x-auto w-full border-b border-gray-50 dark:border-gray-850/30 text-center text-sm font-medium bg-transparent dark:text-gray-200"
+									class="flex mb-2.5 scrollbar-none overflow-x-auto w-full border-b border-gray-50 dark:border-gray-850/30 text-center text-sm font-normal bg-transparent dark:text-gray-200"
 								>
 									{#each excelSheetNames as sheetName}
 										<button
@@ -473,11 +543,11 @@
 							{/if}
 
 							{#if excelHtml}
-								<div class="excel-table-container overflow-auto max-h-[60vh]">
+								<div class="office-preview overflow-auto max-h-[60vh]">
 									{@html excelHtml}
 								</div>
 							{:else}
-								<div class="text-gray-500 text-sm p-4">No content available</div>
+								<div class="text-gray-500 text-sm p-4">{$i18n.t('No content available')}</div>
 							{/if}
 						{/if}
 					{:else if isCode}
@@ -497,6 +567,30 @@
 						>
 							<Markdown content={item.file.data.content} id="markdown-viewer" />
 						</div>
+					{:else if isDocx}
+						{#if docxError}
+							<div class="text-red-500 text-sm p-4">
+								{$i18n.t('Failed to load DOCX file. Please try downloading it instead.')}
+							</div>
+						{:else if docxData}
+							<DocxPreview data={docxData} className="h-[60vh]" />
+						{:else}
+							<div class="text-gray-500 text-sm p-4">{$i18n.t('No content available')}</div>
+						{/if}
+					{:else if isPptx}
+						{#if pptxError}
+							<div class="text-red-500 text-sm p-4">
+								{$i18n.t('Failed to load PPTX file. Please try downloading it instead.')}
+							</div>
+						{:else if pptxSlides.length > 0}
+							<PptxPreview
+								slides={pptxSlides}
+								bind:currentSlide={pptxCurrentSlide}
+								className="h-[60vh]"
+							/>
+						{:else}
+							<div class="text-gray-500 text-sm p-4">{$i18n.t('No content available')}</div>
+						{/if}
 					{:else}
 						<div class="max-h-96 overflow-scroll scrollbar-hidden text-xs whitespace-pre-wrap">
 							{(item?.file?.data?.content ?? '').trim() || 'No content'}

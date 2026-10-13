@@ -14,7 +14,7 @@ from open_webui.utils.vault import (
     format_secret_path,
     ENABLE_VAULT_INTEGRATION
 )
-from open_webui.config import ENABLE_VAULT_INTEGRATION as VAULT_CONFIG
+from open_webui.utils import vault as vault_utils
 from open_webui.models.users import Users
 from loguru import logger
 
@@ -96,7 +96,7 @@ async def create_agent_connection(
             "is_common": connection.is_common
         }
 
-        if VAULT_CONFIG.value:
+        if vault_utils.ENABLE_VAULT_INTEGRATION:
             success = store_agent_connection_in_vault(vault_connection, user.id)
             if not success:
                 raise HTTPException(status_code=500, detail="Failed to store key in Vault")
@@ -125,7 +125,7 @@ async def debug_agent_connections(user=Depends(get_admin_user)):
     """Debug endpoint to check Vault configuration and connection details."""
     try:
         debug_info = {
-            "vault_config_enabled": VAULT_CONFIG.value,
+            "vault_config_enabled": vault_utils.ENABLE_VAULT_INTEGRATION,
             "vault_client_available": False,
             "vault_connection_test": False,
             "vault_secrets_test": False,
@@ -135,7 +135,7 @@ async def debug_agent_connections(user=Depends(get_admin_user)):
             "final_connections": []
         }
 
-        if VAULT_CONFIG.value:
+        if vault_utils.ENABLE_VAULT_INTEGRATION:
             vault_client = get_vault_client()
             if vault_client:
                 debug_info["vault_client_available"] = True
@@ -252,9 +252,9 @@ async def debug_agent_connections(user=Depends(get_admin_user)):
 async def get_agent_connections_status(user=Depends(get_verified_user)):
     """Get the status of agent connections integration."""
     return {
-        "vault_enabled": VAULT_CONFIG.value,
-        "vault_available": False if not VAULT_CONFIG.value else (get_vault_client() is not None and get_vault_client().connect()),
-        "message": "Vault integration is required for agent connections" if not VAULT_CONFIG.value else "Vault integration is available"
+        "vault_enabled": vault_utils.ENABLE_VAULT_INTEGRATION,
+        "vault_available": False if not vault_utils.ENABLE_VAULT_INTEGRATION else (get_vault_client() is not None and get_vault_client().connect()),
+        "message": "Vault integration is required for agent connections" if not vault_utils.ENABLE_VAULT_INTEGRATION else "Vault integration is available"
     }
 
 
@@ -264,7 +264,7 @@ async def list_agent_connections(user=Depends(get_verified_user)):
     try:
         connections = []
 
-        if VAULT_CONFIG.value:
+        if vault_utils.ENABLE_VAULT_INTEGRATION:
             vault_client = get_vault_client()
             if vault_client and vault_client.connect():
                 try:
@@ -314,7 +314,7 @@ async def list_all_agent_connections(user=Depends(get_admin_user)):
     try:
         connections = []
 
-        if VAULT_CONFIG.value:
+        if vault_utils.ENABLE_VAULT_INTEGRATION:
             vault_client = get_vault_client()
             if vault_client and vault_client.connect():
                 try:
@@ -399,7 +399,7 @@ async def get_agent_connection(
         if user_id != user.id and user.role != "admin":
             raise HTTPException(status_code=403, detail="Access denied")
 
-        if VAULT_CONFIG.value:
+        if vault_utils.ENABLE_VAULT_INTEGRATION:
             value = get_agent_connection_from_vault(
                 name=key_name,
                 user_id=user_id,
@@ -442,7 +442,7 @@ async def update_agent_connection(
 
         # Get current value if not updating it
         current_value = None
-        if not connection.key_value and VAULT_CONFIG.value:
+        if not connection.key_value and vault_utils.ENABLE_VAULT_INTEGRATION:
             current_value = get_agent_connection_from_vault(
                 name=current_key_name,
                 user_id=user_id,
@@ -469,7 +469,7 @@ async def update_agent_connection(
             new_is_common != is_common
         )
         if new_key_name != current_key_name or scope_changed:
-            if VAULT_CONFIG.value:
+            if vault_utils.ENABLE_VAULT_INTEGRATION:
                 delete_agent_connection_from_vault(
                     name=current_key_name,
                     user_id=user_id,
@@ -484,7 +484,7 @@ async def update_agent_connection(
             "is_common": new_is_common
         }
 
-        if VAULT_CONFIG.value:
+        if vault_utils.ENABLE_VAULT_INTEGRATION:
             success = store_agent_connection_in_vault(vault_connection, user_id)
             if not success:
                 raise HTTPException(status_code=500, detail="Failed to update key in Vault")
@@ -520,7 +520,7 @@ async def delete_agent_connection(
         if user_id != user.id and user.role != "admin":
             raise HTTPException(status_code=403, detail="Access denied")
 
-        if VAULT_CONFIG.value:
+        if vault_utils.ENABLE_VAULT_INTEGRATION:
             success = delete_agent_connection_from_vault(
                 name=key_name,
                 user_id=user_id,
