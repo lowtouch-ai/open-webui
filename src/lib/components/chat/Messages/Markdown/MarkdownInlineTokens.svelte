@@ -20,6 +20,7 @@
 	import CodespanToken from './MarkdownInlineTokens/CodespanToken.svelte';
 	import MentionToken from './MarkdownInlineTokens/MentionToken.svelte';
 	import NoteLinkToken from './MarkdownInlineTokens/NoteLinkToken.svelte';
+	import AudioPlayer from './AudioPlayer.svelte';
 	import SourceToken from './SourceToken.svelte';
 
 	export let id: string;
@@ -44,6 +45,21 @@
 			// Invalid URL
 		}
 		return null;
+	};
+
+	const isAudioUrl = (url: string): boolean => {
+		const audioExtensions = ['.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac', '.wma'];
+		const urlLower = url.toLowerCase();
+		return audioExtensions.some((ext) => urlLower.includes(ext)) || urlLower.includes('/audio/');
+	};
+
+	const getAudioTitle = (url: string): string => {
+		try {
+			const filename = new URL(url).pathname.split('/').pop() || '';
+			return filename.replace(/\.[^/.]+$/, ''); // Remove extension
+		} catch {
+			return 'Audio';
+		}
 	};
 
 	const getLinkToken = (token: Tokens.Link | Tokens.Generic) => {
@@ -90,7 +106,9 @@
 		<HtmlToken {id} {token} {onSourceClick} />
 	{:else if token.type === 'link'}
 		{@const linkToken = getLinkToken(token)}
-		{#if linkToken.noteId}
+		{#if isAudioUrl(linkToken.href)}
+			<AudioPlayer src={linkToken.href} title={getAudioTitle(linkToken.href)} className="inline-block" />
+		{:else if linkToken.noteId}
 			<NoteLinkToken noteId={linkToken.noteId} href={linkToken.href} />
 		{:else if token.tokens && !linkToken.isAutolink}
 			<a

@@ -7,14 +7,10 @@ secrets in HashiCorp Vault instead of the local database.
 
 import os
 import re
-import base64
 from typing import Dict, Any, Optional, List, Tuple
 
 import hvac
 from hvac.exceptions import VaultError, InvalidPath
-from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from loguru import logger
 
 # Environment variable configuration
@@ -25,68 +21,55 @@ VAULT_VERSION = int(os.environ.get("VAULT_VERSION", "1"))
 ENABLE_VAULT_INTEGRATION = os.environ.get("ENABLE_VAULT_INTEGRATION", "false").lower() == "true"
 VAULT_TIMEOUT = int(os.environ.get("VAULT_TIMEOUT", "30"))
 VAULT_VERIFY_SSL = os.environ.get("VAULT_VERIFY_SSL", "true").lower() == "true"
-VAULT_ENCRYPTION_KEY = os.environ.get("VAULT_ENCRYPTION_KEY", "")
+# NOTE: Values are stored in Vault as-is; no additional application-level encryption.
 
 
-def _get_encryption_key() -> bytes:
-    """Get or generate encryption key for AES encryption.
-    
-    Returns:
-        bytes: Encryption key
-    """
-    if VAULT_ENCRYPTION_KEY:
-        # Use provided key
-        key = VAULT_ENCRYPTION_KEY.encode()
-    else:
-        # Generate a key from a default password (in production, this should be configurable)
-        password = b"open-webui-vault-encryption-key"
-        salt = b"open-webui-salt"  # In production, this should be random and stored securely
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=salt,
-            iterations=100000,
-        )
-        key = base64.urlsafe_b64encode(kdf.derive(password))
-    
-    return key
+def sanitize_agent_name(agent_identifier: Optional[str]) -> str:
+    """Normalize an agent/model identifier to an underscore-safe name.
 
+    Rule:
+      - If the identifier contains a colon, take the substring BEFORE the first colon.
+      - Replace all non-alphanumeric characters with underscores ('_').
+      - Collapse consecutive non-alphanumerics into a single underscore.
+      - Trim leading/trailing underscores.
+      - If result is empty, fall back to "default".
 
-def _encrypt_value(value: str) -> str:
-    """Encrypt a value using AES.
-    
+    Examples:
+      - "webshop-email:0.5" -> "webshop_email"
+      - "webshop/hr:0.3" -> "webshop_hr"
+      - "webshop@special#chars:1.0" -> "webshop_special_chars"
+
     Args:
-        value: Value to encrypt
-        
+        agent_identifier: The agent/model identifier string.
+
     Returns:
-        str: Base64 encoded encrypted value
+        str: Underscore-normalized agent name suitable as a single path segment.
     """
-    try:
-        fernet = Fernet(_get_encryption_key())
-        encrypted_value = fernet.encrypt(value.encode())
-        return base64.b64encode(encrypted_value).decode()
-    except Exception as e:
-        logger.error(f"Failed to encrypt value: {str(e)}")
-        raise
+    if not agent_identifier:
+        return "default"
+    ident = str(agent_identifier)
+    # Take part before the first ':' if present
+    if ":" in ident:
+        ident = ident.split(":", 1)[0]
+    # Replace any run of non-alphanumeric chars with a single underscore
+    normalized = re.sub(r"[^A-Za-z0-9]+", "_", ident).strip("_")
+    return normalized if normalized else "default"
 
 
-def _decrypt_value(encrypted_value: str) -> str:
-    """Decrypt a value using AES.
-    
-    Args:
-        encrypted_value: Base64 encoded encrypted value
-        
-    Returns:
-        str: Decrypted value
+def sanitize_key_field(key: str) -> str:
+    """Sanitize a secret field (key name) to match our storage and filtering rules.
+
+    Rules:
+      - Drop anything after the first ':' (exclusive). E.g., 'webshop_hr:0.3' -> 'webshop_hr'.
+      - Replace '/' and '\\' with '_'.
+      - Leave other characters as-is to preserve readability.
     """
-    try:
-        fernet = Fernet(_get_encryption_key())
-        encrypted_bytes = base64.b64decode(encrypted_value.encode())
-        decrypted_value = fernet.decrypt(encrypted_bytes)
-        return decrypted_value.decode()
-    except Exception as e:
-        logger.error(f"Failed to decrypt value: {str(e)}")
-        raise
+    if key is None:
+        return key
+    # Drop version suffix or trailing part after ':'
+    head = key.split(":", 1)[0]
+    # Replace path separators with underscore
+    return head.replace("/", "_").replace("\\", "_")
 
 
 class VaultClient:
@@ -297,97 +280,40 @@ def test_vault_connection(
         return False, f"Error connecting to Vault: {str(e)}"
 
 
-def sanitize_vault_keys_header(vault_keys_str: str, model: str) -> str:
-    """Normalize the x-ltai-vault-keys header value to the format expected by the agent backend.
+def format_secret_key(name: str, user_id: str, agent_id: Optional[str] = None, is_common: bool = False) -> str:
+    """Format the base Vault secret path: users/<user_id>/<agent_name>.
 
-    The agent backend derives the agent name by sanitizing the model ID:
-        agent_name = re.sub(r'[^a-zA-Z0-9]', '_', re.match(r'([^:]+)', model).group(1))
-
-    So for model 'appz/tracker' the expected key format is 'appz_tracker/KEY_NAME'.
-
-    Clients may send the key in the raw format '{model}_{KEY_NAME}' (e.g.
-    'appz/tracker_TRACKER_API_KEY'). This function detects both raw and already-sanitized
-    formats and normalises them to 'sanitized_model/KEY_NAME'.
-
-    Keys starting with '^' are COMMON-scope and are left untouched.
-    """
-    if not vault_keys_str or not model:
-        return vault_keys_str
-
-    model_base = re.match(r'([^:]+)', model).group(1)  # strip :tag suffix
-    sanitized_model = re.sub(r'[^a-zA-Z0-9]', '_', model_base)
-
-    result = []
-    for vault_key in vault_keys_str.split(','):
-        vault_key = vault_key.strip()
-        if not vault_key:
-            continue
-        if vault_key.startswith('^'):
-            result.append(vault_key)
-        else:
-            # Case 1: raw model prefix with '_' separator – e.g. 'appz/tracker_KEY_NAME'
-            raw_prefix = model_base + '_'
-            if vault_key.startswith(raw_prefix):
-                key_name = vault_key[len(raw_prefix):]
-                result.append(f"{sanitized_model}/{key_name}")
-            # Case 2: already has '/' separator – sanitize agent-name portion only
-            elif '/' in vault_key:
-                agent_part, key_part = vault_key.rsplit('/', 1)
-                sanitized_agent = re.sub(r'[^a-zA-Z0-9]', '_', agent_part)
-                result.append(f"{sanitized_agent}/{key_part}")
-            else:
-                result.append(vault_key)
-
-    return ','.join(result)
-
-
-def sanitize_agent_id(agent_id: str) -> str:
-    """Sanitize an agent ID to match the agent backend's naming convention.
-
-    The agent backend derives the agent name as:
-        agent_name = re.sub(r'[^a-zA-Z0-9]', '_', re.match(r'([^:]+)', model).group(1))
-
-    So 'appz/tracker' becomes 'appz_tracker'.
-    """
-    base = re.match(r'([^:]+)', agent_id).group(1)
-    return re.sub(r'[^a-zA-Z0-9]', '_', base)
-
-
-def format_secret_path(user_id: str, agent_id: Optional[str] = None, is_common: bool = False) -> str:
-    """Format the Vault path for an agent's secrets.
-
-    Layout matches the agent backend: users/<user_id>/<sanitized_agent>
-    All keys for an agent are stored as key-value pairs in a single Vault secret.
+    Note: The parameter "name" is ignored in the path in the new scheme. The actual
+    key (field) is stored inside the secret data at this path, not in the path name.
 
     Args:
-        user_id: User ID
-        agent_id: Agent/model ID (e.g. 'appz/tracker'), optional
-        is_common: Whether the secret scope is COMMON
+        name: Secret field name (unused for path construction).
+        user_id: Vault user id (can be a logical id from header).
+        agent_id: Agent identifier (model string); will be sanitized.
+        is_common: If True, use "COMMON" scope.
 
     Returns:
-        str: Vault secret path
+        str: Formatted secret base path (relative to mount point).
     """
     if is_common:
-        return f"users/{user_id}/COMMON"
+        agent_name = "COMMON"
     elif agent_id:
-        return f"users/{user_id}/{sanitize_agent_id(agent_id)}"
+        agent_name = sanitize_agent_name(agent_id)
     else:
-        return f"users/{user_id}/default"
+        agent_name = "default"
+    return f"users/{user_id}/{agent_name}"
 
 
 def store_agent_connection_in_vault(connection: Dict[str, Any], user_id: str) -> bool:
-    """Store an agent connection in Vault as plain text.
+    """Store/update an agent connection value in Vault without extra encryption.
 
-    Values are stored unencrypted so the agent backend can read them
-    directly.  Vault itself provides the security envelope.
-
-    Secrets are stored as a single Vault secret per agent at
-    users/<user_id>/<sanitized_agent> with all keys as dict entries:
-        { "KEY_NAME": "plain_value", ... }
+    New schema:
+      - Path: users/<user_id>/<agent_name>
+      - Secret data: { <key_name>: <plain_value>, ... }
 
     Args:
-        connection: Agent connection data
-        user_id: User ID for the path structure
+        connection: Agent connection data containing 'name', 'value', optional 'agent_id', 'is_common'.
+        user_id: Vault user id (may come from header).
 
     Returns:
         bool: True if successful, False otherwise
@@ -408,12 +334,12 @@ def store_agent_connection_in_vault(connection: Dict[str, Any], user_id: str) ->
         return False
 
     try:
-        path = format_secret_path(user_id, agent_id, is_common)
-
-        # Read existing secret so we can merge the new key into it
+        path = format_secret_key(name, user_id, agent_id, is_common)
+        # Merge with existing data to preserve other keys under the same agent secret
         existing = client.get_secret(path) or {}
-        existing[name] = str(value)
-
+        # Store using sanitized key field (replace path separators)
+        sanitized = sanitize_key_field(name)
+        existing[sanitized] = str(value)
         return client.set_secret(path, existing)
     except Exception as e:
         logger.error(f"Failed to store agent connection in vault: {str(e)}")
@@ -426,16 +352,16 @@ def get_agent_connection_from_vault(
     is_common: bool = False,
     agent_id: Optional[str] = None
 ) -> Optional[str]:
-    """Get an agent connection from Vault.
+    """Get an agent connection value from Vault without extra decryption.
 
     Args:
-        name: Secret name (key within the agent secret dict)
-        user_id: User ID for the path structure
-        is_common: Whether the secret is common to all agents
-        agent_id: Agent ID if not common
+        name: Field name within the Vault secret.
+        user_id: Vault user id.
+        is_common: Whether the secret is common to all agents.
+        agent_id: Agent identifier (model string) for agent-specific scope.
 
     Returns:
-        Optional[str]: Secret value or None if not found
+        Optional[str]: Secret value or None if not found.
     """
     if not ENABLE_VAULT_INTEGRATION:
         return None
@@ -445,11 +371,14 @@ def get_agent_connection_from_vault(
         return None
 
     try:
-        path = format_secret_path(user_id, agent_id, is_common)
+        # Read from the target (uppercase COMMON) path
+        path = format_secret_key(name, user_id, agent_id, is_common)
         secret = client.get_secret(path)
 
-        if secret and name in secret:
-            return secret[name]
+        if secret:
+            sanitized = sanitize_key_field(name)
+            if sanitized in secret:
+                return secret[sanitized]
 
         return None
     except Exception as e:
@@ -463,16 +392,15 @@ def delete_agent_connection_from_vault(
     is_common: bool = False,
     agent_id: Optional[str] = None
 ) -> bool:
-    """Delete an agent connection key from Vault.
+    """Delete an agent connection field from Vault.
 
-    Removes the key from the agent's secret dict. If no keys remain,
-    deletes the entire Vault secret.
+    If the secret has no fields left after deletion, remove the secret path.
 
     Args:
-        name: Secret name (key within the agent secret dict)
-        user_id: User ID for the path structure
-        is_common: Whether the secret is common to all agents
-        agent_id: Agent ID if not common
+        name: Field name to remove.
+        user_id: Vault user id.
+        is_common: Whether the secret is common to all agents.
+        agent_id: Agent identifier (model string) for agent-specific scope.
 
     Returns:
         bool: True if successful, False otherwise
@@ -485,53 +413,52 @@ def delete_agent_connection_from_vault(
         return False
 
     try:
-        path = format_secret_path(user_id, agent_id, is_common)
-        existing = client.get_secret(path)
+        # Attempt deletion on the target (uppercase COMMON) path
+        path = format_secret_key(name, user_id, agent_id, is_common)
+        secret = client.get_secret(path)
+        deleted_any = False
+        if secret:
+            sanitized = sanitize_key_field(name)
+            if sanitized in secret:
+                secret.pop(sanitized, None)
+            if secret:
+                deleted_any = client.set_secret(path, secret)
+            else:
+                deleted_any = client.delete_secret(path)
 
-        if not existing or name not in existing:
-            return True  # Key doesn't exist, nothing to delete
-
-        del existing[name]
-
-        if existing:
-            # Other keys remain — write back the reduced dict
-            return client.set_secret(path, existing)
-        else:
-            # No keys left — delete the whole secret
-            return client.delete_secret(path)
+        # If path/field didn't exist, treat as success
+        return True if not deleted_any else deleted_any
     except Exception as e:
         logger.error(f"Failed to delete agent connection from vault: {str(e)}")
         return False
 
 
-def list_agent_keys_from_vault(
-    user_id: str,
-    agent_id: Optional[str] = None,
-    is_common: bool = False
-) -> List[str]:
-    """List all key names stored for an agent in Vault.
+def sanitize_vault_keys_header(vault_keys_str: str, model: str) -> str:
+    """Normalize the x-ltai-vault-keys header value to 'sanitized_model/KEY_NAME'.
 
-    Args:
-        user_id: User ID
-        agent_id: Agent/model ID
-        is_common: Whether to list COMMON scope keys
-
-    Returns:
-        List[str]: Key names
+    Accepts the raw '{model}_{KEY_NAME}' form (e.g. 'appz/tracker_API_KEY'), the
+    slash-separated but unsanitized form, and the already-correct form. Keys
+    starting with '^' are COMMON-scope and are left untouched.
     """
-    if not ENABLE_VAULT_INTEGRATION:
-        return []
+    if not vault_keys_str or not model:
+        return vault_keys_str
 
-    client = get_vault_client()
-    if not client:
-        return []
+    model_base = re.match(r'([^:]+)', model).group(1)  # strip :tag suffix
+    sanitized_model = re.sub(r'[^a-zA-Z0-9]', '_', model_base)
 
-    try:
-        path = format_secret_path(user_id, agent_id, is_common)
-        secret = client.get_secret(path)
-        if secret:
-            return list(secret.keys())
-        return []
-    except Exception as e:
-        logger.error(f"Failed to list agent keys from vault: {str(e)}")
-        return []
+    result = []
+    for vault_key in vault_keys_str.split(','):
+        vault_key = vault_key.strip()
+        if not vault_key:
+            continue
+        if vault_key.startswith('^'):
+            result.append(vault_key)
+        elif vault_key.startswith(model_base + '_'):
+            result.append(f"{sanitized_model}/{vault_key[len(model_base) + 1:]}")
+        elif '/' in vault_key:
+            agent_part, key_part = vault_key.rsplit('/', 1)
+            result.append(f"{re.sub(r'[^a-zA-Z0-9]', '_', agent_part)}/{key_part}")
+        else:
+            result.append(vault_key)
+
+    return ','.join(result)

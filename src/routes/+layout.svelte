@@ -57,6 +57,7 @@
 	import { getSessionUser, updateUserTimezone, userSignOut } from '$lib/apis/auths';
 	import { getAllTags } from '$lib/apis/chats';
 	import { chatCompletion } from '$lib/apis/openai';
+	import { installClientTimeHeadersFetchPatch } from '$lib/utils/installClientTimeHeadersFetchPatch';
 	import { isTemporaryChatId } from '$lib/utils/chatId';
 	import {
 		addOpenAIConnection,
@@ -701,10 +702,16 @@
 								form_data['model'] = form_data['model'].replace(`${prefixId}.`, ``);
 							}
 
+							// Extract agent ID from model for vault keys
+							const { extractAgentIdFromModel } = await import('$lib/utils/agent-connections');
+							const model = $models.find((m) => m.id === form_data.model);
+							const agentId = extractAgentIdFromModel(model);
+
 							const [res, controller] = await chatCompletion(
 								OPENAI_API_KEY,
 								form_data,
-								OPENAI_API_URL
+								OPENAI_API_URL,
+								agentId
 							);
 
 							if (res) {
@@ -1118,6 +1125,9 @@
 	};
 
 	onMount(async () => {
+		// Attach client time/timezone headers to WebUI API requests
+		installClientTimeHeadersFetchPatch();
+
 		const originalFetch = window.fetch.bind(window);
 		window.fetch = async (input, init) => {
 			const response = await originalFetch(input, init);

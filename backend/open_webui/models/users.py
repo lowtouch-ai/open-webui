@@ -402,6 +402,8 @@ class UsersTable:
                     'updated_at': int(time.time()),
                     'username': username,
                     'oauth': oauth,
+                    # Default new users to the browser (web) speech-to-text engine
+                    'settings': {'version': 0, 'ui': {'audio': {'stt': {'engine': 'web'}}}},
                 }
             )
             result = User(**user.model_dump())

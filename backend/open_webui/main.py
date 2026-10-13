@@ -1318,6 +1318,32 @@ async def chat_completion(
         ltai_headers = {k: v for k, v in request.headers.items() if k.lower().startswith('x-ltai-')}
         log.info(f'[LTAI] incoming ltai headers (keys): {list(ltai_headers.keys())}')
 
+        # Expose file URLs and image references from the current chat to the agent
+        file_urls = [
+            f['url'] for f in (form_data.get('files') or []) if isinstance(f, dict) and f.get('url')
+        ]
+        if file_urls:
+            ltai_headers['x-ltai-file-urls'] = ','.join(file_urls)
+
+        image_http_urls = []
+        image_data_count = 0
+        for message in form_data.get('messages') or []:
+            content = message.get('content') if isinstance(message, dict) else None
+            if not isinstance(content, list):
+                continue
+            for part in content:
+                if isinstance(part, dict) and part.get('type') == 'image_url':
+                    url = (part.get('image_url') or {}).get('url')
+                    if isinstance(url, str):
+                        if url.startswith(('http://', 'https://')):
+                            image_http_urls.append(url)
+                        elif url.startswith('data:'):
+                            image_data_count += 1
+        if image_http_urls:
+            ltai_headers['x-ltai-image-urls'] = ','.join(image_http_urls)
+        if image_data_count:
+            ltai_headers['x-ltai-image-data-count'] = str(image_data_count)
+
         metadata = {
             'tool_approval_resume': approval_resume[2]
             if approval_resume and approval_resume[:2] == (chat_id, form_data.get('assistant_message_id'))

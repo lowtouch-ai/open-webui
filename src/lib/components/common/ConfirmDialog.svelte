@@ -196,6 +196,7 @@
 							cancelHandler();
 						}}
 						type="button"
+						data-cy="cancel-delete-button"
 					>
 						{cancelLabel ?? $i18n.t('Cancel')}
 					</button>
@@ -205,6 +206,7 @@
 							confirmHandler();
 						}}
 						type="button"
+						data-cy="confirm-delete-button"
 					>
 						{confirmLabel ?? $i18n.t('Confirm')}
 					</button>

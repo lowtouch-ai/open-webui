@@ -244,6 +244,12 @@ async def get_headers_and_cookies(
             else:
                 headers[k] = v
 
+    # Headers derived by the chat handler (e.g. x-ltai-file-urls, x-ltai-image-urls)
+    present = {k.lower() for k in headers}
+    for k, v in ((metadata or {}).get('ltai_headers') or {}).items():
+        if k.lower() not in present:
+            headers[k] = v
+
     return headers, cookies
 
 
