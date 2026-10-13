@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { safeLinkUrl } from '$lib/utils';
+
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import ChevronUp from '$lib/components/icons/ChevronUp.svelte';
 	import Search from '$lib/components/icons/Search.svelte';
@@ -19,7 +21,7 @@
 	</div>
 
 	<div
-		class="text-sm border border-gray-50 dark:border-gray-850 rounded-xl my-1.5 p-2 w-full"
+		class="text-sm border border-gray-50 dark:border-gray-850/30 rounded-xl my-1.5 p-2 w-full"
 		slot="content"
 	>
 		{#if status?.query}
@@ -59,7 +61,7 @@
 		{#if status?.items}
 			{#each status.items as item, itemIdx}
 				<a
-					href={item.link}
+					href={safeLinkUrl(item.link)}
 					target="_blank"
 					class="flex w-full items-center p-1 px-3 group/item justify-between text-gray-800 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850 rounded-lg font-normal! no-underline! mb-1"
 				>
@@ -67,7 +69,7 @@
 						<div class="w-fit">
 							<img
 								src="https://www.google.com/s2/favicons?sz=32&domain={item.link}"
-								alt="favicon"
+								alt="{item?.title ?? item.link} favicon"
 								class="size-3.5"
 							/>
 						</div>
@@ -99,7 +101,7 @@
 		{:else if status?.urls}
 			{#each status.urls as url, urlIdx}
 				<a
-					href={url}
+					href={safeLinkUrl(url)}
 					target="_blank"
 					class="flex w-full items-center p-1 px-3 group/item justify-between text-gray-800 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850 rounded-lg no-underline mb-1"
 				>
@@ -107,7 +109,7 @@
 						<div class="w-fit">
 							<img
 								src="https://www.google.com/s2/favicons?sz=32&domain={url}"
-								alt="favicon"
+								alt="{url} favicon"
 								class="size-3.5"
 							/>
 						</div>

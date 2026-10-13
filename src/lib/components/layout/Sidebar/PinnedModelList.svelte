@@ -1,10 +1,17 @@
 <script>
 	import Sortable from 'sortablejs';
 
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 
-	import { chatId, mobile, models, settings, showSidebar } from '$lib/stores';
-	import { WEBUI_BASE_URL } from '$lib/constants';
+	import {
+		chatId,
+		mobile,
+		models,
+		pinnedModels,
+		settings,
+		showSidebar,
+		visiblePinnedModels
+	} from '$lib/stores';
 	import { updateUserSettings } from '$lib/apis/users';
 	import PinnedModelItem from './PinnedModelItem.svelte';
 
@@ -16,48 +23,61 @@
 		if (pinnedModelsList && !$mobile) {
 			new Sortable(pinnedModelsList, {
 				animation: 150,
+				setData: function (dataTransfer, dragEl) {
+					dataTransfer.setData(
+						'text/plain',
+						JSON.stringify({
+							type: 'model',
+							id: dragEl.dataset.id
+						})
+					);
+				},
 				onUpdate: async (event) => {
-					const modelId = event.item.dataset.id;
-					const newIndex = event.newIndex;
+					const reorderedIds = [...$visiblePinnedModels];
+					const [movedId] = reorderedIds.splice(event.oldIndex, 1);
+					reorderedIds.splice(event.newIndex, 0, movedId);
 
-					const pinnedModels = $settings.pinnedModels;
-					const oldIndex = pinnedModels.indexOf(modelId);
-
-					pinnedModels.splice(oldIndex, 1);
-					pinnedModels.splice(newIndex, 0, modelId);
-
-					settings.set({ ...$settings, pinnedModels: pinnedModels });
-					await updateUserSettings(localStorage.token, { ui: $settings });
+					// Keep pins for models the user cannot see
+					settings.set({
+						...$settings,
+						pinnedModels: [
+							...reorderedIds,
+							...$pinnedModels.filter((id) => !$visiblePinnedModels.includes(id))
+						]
+					});
+					await updateUserSettings(localStorage.token, {
+						ui: { pinnedModels: $settings.pinnedModels }
+					});
 				}
 			});
 		}
 	};
 
-	onMount(() => {
+	onMount(async () => {
+		await tick();
 		initPinnedModelsSortable();
 	});
 </script>
 
 <div class="mt-0.5 pb-1.5" id="pinned-models-list">
-	{#each $settings.pinnedModels as modelId (modelId)}
-		{@const model = $models.find((model) => model.id === modelId)}
-		{#if model}
-			<PinnedModelItem
-				{model}
-				{shiftKey}
-				onClick={() => {
-					selectedChatId = null;
-					chatId.set('');
-					if ($mobile) {
-						showSidebar.set(false);
-					}
-				}}
-				onUnpin={() => {
-					const pinnedModels = $settings.pinnedModels.filter((id) => id !== modelId);
-					settings.set({ ...$settings, pinnedModels });
-					updateUserSettings(localStorage.token, { ui: $settings });
-				}}
-			/>
-		{/if}
+	{#each $visiblePinnedModels as modelId (modelId)}
+		<PinnedModelItem
+			model={$models.find((model) => model.id === modelId)}
+			{shiftKey}
+			onClick={() => {
+				selectedChatId = null;
+				chatId.set('');
+				if ($mobile) {
+					showSidebar.set(false);
+				}
+			}}
+			onUnpin={() => {
+				settings.set({
+					...$settings,
+					pinnedModels: $pinnedModels.filter((id) => id !== modelId)
+				});
+				updateUserSettings(localStorage.token, { ui: { pinnedModels: $settings.pinnedModels } });
+			}}
+		/>
 	{/each}
 </div>

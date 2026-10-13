@@ -108,7 +108,8 @@ export async function buildVaultKeysHeader(agentId?: string): Promise<string | n
             return `${prefix}/${conn.key_name}`;
         });
 
-        const headerVal = vaultKeys.join(',');
+        // De-duplicate keys (a connection can match more than one filter)
+        const headerVal = [...new Set(vaultKeys)].join(',');
         console.log('[VaultKeys] Final header value:', headerVal);
         return headerVal;
     } catch (error) {

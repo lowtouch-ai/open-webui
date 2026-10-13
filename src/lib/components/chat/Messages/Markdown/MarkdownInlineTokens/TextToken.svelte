@@ -1,19 +1,18 @@
 <script lang="ts">
-	import { fade } from 'svelte/transition';
+	import { settings } from '$lib/stores';
 
 	export let token;
 	export let done = true;
 
-	let texts = [];
-	$: texts = (token?.raw ?? '').split(' ');
+	$: raw = token?.raw ?? '';
 </script>
 
-{#if done}
-	{token?.raw}
+{#if done || !($settings?.chatFadeStreamingText ?? true)}
+	{raw}
 {:else}
-	{#each texts as text}
-		<span class="" transition:fade={{ duration: 100 }}>
-			{text}
+	{#each raw.split(' ') as text}
+		<span class="fade-in-token">
+			{text}{' '}
 		</span>
 	{/each}
 {/if}

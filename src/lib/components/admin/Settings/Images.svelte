@@ -11,62 +11,34 @@
 		updateImageGenerationConfig,
 		getConfig,
 		updateConfig,
-		verifyConfigUrl
+		verifyConnection
 	} from '$lib/apis/images';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
+	import CodeEditorModal from '$lib/components/common/CodeEditorModal.svelte';
+	import SettingsSelect from '$lib/components/common/SettingsSelect.svelte';
+	import AdminSettingField from './AdminSettingField.svelte';
+	import AdminSettingRow from './AdminSettingRow.svelte';
+	import AdminSettingSection from './AdminSettingSection.svelte';
+
 	const dispatch = createEventDispatcher();
 
-	const i18n = getContext('i18n');
+	const i18n: any = getContext('i18n');
 
 	let loading = false;
 
-	let config = null;
-	let imageGenerationConfig = null;
-
 	let models = null;
+	let config = null;
+	const inputClass =
+		'w-full h-7 rounded-lg border border-gray-100/50 bg-gray-50/40 px-2 text-xs text-gray-700 outline-hidden transition-colors placeholder:text-gray-300 focus:border-blue-400 dark:border-white/[0.04] dark:bg-white/[0.03] dark:text-gray-300 dark:placeholder:text-gray-700 dark:focus:border-blue-500';
+	const textareaClass =
+		'w-full rounded-lg border border-gray-100/50 bg-gray-50/40 px-2 py-1.5 text-xs text-gray-700 outline-hidden transition-colors placeholder:text-gray-300 focus:border-blue-400 dark:border-white/[0.04] dark:bg-white/[0.03] dark:text-gray-300 dark:placeholder:text-gray-700 dark:focus:border-blue-500';
 
-	let samplers = [
-		'DPM++ 2M',
-		'DPM++ SDE',
-		'DPM++ 2M SDE',
-		'DPM++ 2M SDE Heun',
-		'DPM++ 2S a',
-		'DPM++ 3M SDE',
-		'Euler a',
-		'Euler',
-		'LMS',
-		'Heun',
-		'DPM2',
-		'DPM2 a',
-		'DPM fast',
-		'DPM adaptive',
-		'Restart',
-		'DDIM',
-		'DDIM CFG++',
-		'PLMS',
-		'UniPC'
-	];
-
-	let schedulers = [
-		'Automatic',
-		'Uniform',
-		'Karras',
-		'Exponential',
-		'Polyexponential',
-		'SGM Uniform',
-		'KL Optimal',
-		'Align Your Steps',
-		'Simple',
-		'Normal',
-		'DDIM',
-		'Beta'
-	];
-
-	let requiredWorkflowNodes = [
+	let showComfyUIWorkflowEditor = false;
+	let REQUIRED_WORKFLOW_NODES = [
 		{
 			type: 'prompt',
 			key: 'text',
@@ -99,6 +71,35 @@
 		}
 	];
 
+	let showComfyUIEditWorkflowEditor = false;
+	let REQUIRED_EDIT_WORKFLOW_NODES = [
+		{
+			type: 'image',
+			key: 'image',
+			node_ids: ''
+		},
+		{
+			type: 'prompt',
+			key: 'prompt',
+			node_ids: ''
+		},
+		{
+			type: 'model',
+			key: 'unet_name',
+			node_ids: ''
+		},
+		{
+			type: 'width',
+			key: 'width',
+			node_ids: ''
+		},
+		{
+			type: 'height',
+			key: 'height',
+			node_ids: ''
+		}
+	];
+
 	const getModels = async () => {
 		models = await getImageGenerationModels(localStorage.token).catch((error) => {
 			toast.error(`${error}`);
@@ -107,24 +108,58 @@
 	};
 
 	const updateConfigHandler = async () => {
-		const res = await updateConfig(localStorage.token, config)
-			.catch((error) => {
-				toast.error(`${error}`);
-				return null;
-			})
-			.catch((error) => {
-				toast.error(`${error}`);
-				return null;
-			});
+		if (
+			config.IMAGE_GENERATION_ENGINE === 'automatic1111' &&
+			config.AUTOMATIC1111_BASE_URL === ''
+		) {
+			toast.error($i18n.t('AUTOMATIC1111 Base URL is required.'));
+			config.ENABLE_IMAGE_GENERATION = false;
+
+			return null;
+		} else if (config.IMAGE_GENERATION_ENGINE === 'comfyui' && config.COMFYUI_BASE_URL === '') {
+			toast.error($i18n.t('ComfyUI Base URL is required.'));
+			config.ENABLE_IMAGE_GENERATION = false;
+
+			return null;
+		} else if (config.IMAGE_GENERATION_ENGINE === 'openai' && config.IMAGES_OPENAI_API_KEY === '') {
+			toast.error($i18n.t('OpenAI API Key is required.'));
+			config.ENABLE_IMAGE_GENERATION = false;
+
+			return null;
+		} else if (config.IMAGE_GENERATION_ENGINE === 'gemini' && config.IMAGES_GEMINI_API_KEY === '') {
+			toast.error($i18n.t('Gemini API Key is required.'));
+			config.ENABLE_IMAGE_GENERATION = false;
+
+			return null;
+		}
+
+		const res = await updateConfig(localStorage.token, {
+			...config,
+			AUTOMATIC1111_PARAMS:
+				typeof config.AUTOMATIC1111_PARAMS === 'string' && config.AUTOMATIC1111_PARAMS.trim() !== ''
+					? JSON.parse(config.AUTOMATIC1111_PARAMS)
+					: {},
+			IMAGES_OPENAI_API_PARAMS:
+				typeof config.IMAGES_OPENAI_API_PARAMS === 'string' &&
+				config.IMAGES_OPENAI_API_PARAMS.trim() !== ''
+					? JSON.parse(config.IMAGES_OPENAI_API_PARAMS)
+					: {}
+		}).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
 
 		if (res) {
-			config = res;
+			backendConfig.set(await getBackendConfig());
+
+			if (res.ENABLE_IMAGE_GENERATION) {
+				getModels();
+			}
+
+			return res;
 		}
 
-		if (config.enabled) {
-			backendConfig.set(await getBackendConfig());
-			getModels();
-		}
+		return null;
 	};
 
 	const validateJSON = (json) => {
@@ -141,16 +176,34 @@
 	const saveHandler = async () => {
 		loading = true;
 
-		if (config?.comfyui?.COMFYUI_WORKFLOW) {
-			if (!validateJSON(config.comfyui.COMFYUI_WORKFLOW)) {
+		if (
+			typeof config?.IMAGES_OPENAI_API_PARAMS === 'string' &&
+			config.IMAGES_OPENAI_API_PARAMS.trim() !== '' &&
+			!validateJSON(config.IMAGES_OPENAI_API_PARAMS)
+		) {
+			toast.error($i18n.t('Invalid JSON format for Parameters'));
+			loading = false;
+			return;
+		}
+
+		if (
+			typeof config?.AUTOMATIC1111_PARAMS === 'string' &&
+			config.AUTOMATIC1111_PARAMS.trim() !== '' &&
+			!validateJSON(config.AUTOMATIC1111_PARAMS)
+		) {
+			toast.error($i18n.t('Invalid JSON format for Parameters'));
+			loading = false;
+			return;
+		}
+
+		if (config?.COMFYUI_WORKFLOW) {
+			if (!validateJSON(config?.COMFYUI_WORKFLOW)) {
 				toast.error($i18n.t('Invalid JSON format for ComfyUI Workflow.'));
 				loading = false;
 				return;
 			}
-		}
 
-		if (config?.comfyui?.COMFYUI_WORKFLOW) {
-			config.comfyui.COMFYUI_WORKFLOW_NODES = requiredWorkflowNodes.map((node) => {
+			config.COMFYUI_WORKFLOW_NODES = REQUIRED_WORKFLOW_NODES.map((node) => {
 				return {
 					type: node.type,
 					key: node.key,
@@ -160,20 +213,28 @@
 			});
 		}
 
-		await updateConfig(localStorage.token, config).catch((error) => {
-			toast.error(`${error}`);
-			loading = false;
-			return null;
-		});
+		if (config?.IMAGES_EDIT_COMFYUI_WORKFLOW) {
+			if (!validateJSON(config?.IMAGES_EDIT_COMFYUI_WORKFLOW)) {
+				toast.error($i18n.t('Invalid JSON format for ComfyUI Edit Workflow.'));
+				loading = false;
+				return;
+			}
 
-		await updateImageGenerationConfig(localStorage.token, imageGenerationConfig).catch((error) => {
-			toast.error(`${error}`);
-			loading = false;
-			return null;
-		});
+			config.IMAGES_EDIT_COMFYUI_WORKFLOW_NODES = REQUIRED_EDIT_WORKFLOW_NODES.map((node) => {
+				return {
+					type: node.type,
+					key: node.key,
+					node_ids:
+						node.node_ids.trim() === '' ? [] : node.node_ids.split(',').map((id) => id.trim())
+				};
+			});
+		}
 
-		getModels();
-		dispatch('save');
+		const res = await updateConfigHandler();
+		if (res) {
+			dispatch('save');
+		}
+
 		loading = false;
 	};
 
@@ -188,25 +249,24 @@
 				config = res;
 			}
 
-			if (config.enabled) {
+			if (!config) {
+				return;
+			}
+
+			if (config.ENABLE_IMAGE_GENERATION) {
 				getModels();
 			}
 
-			if (config.comfyui.COMFYUI_WORKFLOW) {
+			if (config.COMFYUI_WORKFLOW) {
 				try {
-					config.comfyui.COMFYUI_WORKFLOW = JSON.stringify(
-						JSON.parse(config.comfyui.COMFYUI_WORKFLOW),
-						null,
-						2
-					);
+					config.COMFYUI_WORKFLOW = JSON.stringify(JSON.parse(config.COMFYUI_WORKFLOW), null, 2);
 				} catch (e) {
 					console.error(e);
 				}
 			}
 
-			requiredWorkflowNodes = requiredWorkflowNodes.map((node) => {
-				const n = config.comfyui.COMFYUI_WORKFLOW_NODES.find((n) => n.type === node.type) ?? node;
-
+			REQUIRED_WORKFLOW_NODES = REQUIRED_WORKFLOW_NODES.map((node) => {
+				const n = config.COMFYUI_WORKFLOW_NODES.find((n) => n.type === node.type) ?? node;
 				console.debug(n);
 
 				return {
@@ -216,529 +276,783 @@
 				};
 			});
 
-			const imageConfigRes = await getImageGenerationConfig(localStorage.token).catch((error) => {
-				toast.error(`${error}`);
-				return null;
-			});
-
-			if (imageConfigRes) {
-				imageGenerationConfig = imageConfigRes;
+			if (config.IMAGES_EDIT_COMFYUI_WORKFLOW) {
+				try {
+					config.IMAGES_EDIT_COMFYUI_WORKFLOW = JSON.stringify(
+						JSON.parse(config.IMAGES_EDIT_COMFYUI_WORKFLOW),
+						null,
+						2
+					);
+				} catch (e) {
+					console.error(e);
+				}
 			}
+
+			config.IMAGES_OPENAI_API_PARAMS =
+				typeof config.IMAGES_OPENAI_API_PARAMS === 'object'
+					? JSON.stringify(config.IMAGES_OPENAI_API_PARAMS ?? {}, null, 2)
+					: config.IMAGES_OPENAI_API_PARAMS;
+
+			config.AUTOMATIC1111_PARAMS =
+				typeof config.AUTOMATIC1111_PARAMS === 'object'
+					? JSON.stringify(config.AUTOMATIC1111_PARAMS ?? {}, null, 2)
+					: config.AUTOMATIC1111_PARAMS;
+
+			REQUIRED_EDIT_WORKFLOW_NODES = REQUIRED_EDIT_WORKFLOW_NODES.map((node) => {
+				const n =
+					config.IMAGES_EDIT_COMFYUI_WORKFLOW_NODES.find((n) => n.type === node.type) ?? node;
+				console.debug(n);
+
+				return {
+					type: n.type,
+					key: n.key,
+					node_ids: typeof n.node_ids === 'string' ? n.node_ids : n.node_ids.join(',')
+				};
+			});
 		}
 	});
 </script>
 
 <form
-	class="flex flex-col h-full justify-between space-y-3 text-sm"
+	class="flex h-full flex-col justify-between text-sm"
 	on:submit|preventDefault={async () => {
 		saveHandler();
 	}}
 >
-	<div class=" space-y-3 overflow-y-scroll scrollbar-hidden pr-2">
-		{#if config && imageGenerationConfig}
-			<div>
-				<div class=" mb-1 text-sm font-medium">{$i18n.t('Image Settings')}</div>
+	<h2 class="text-sm font-medium text-gray-900 dark:text-white mb-4">
+		{$i18n.t('settings.admin.images.title')}
+	</h2>
 
-				<div>
-					<div class=" py-1 flex w-full justify-between">
-						<div class=" self-center text-xs font-medium">
-							{$i18n.t('Image Generation (Experimental)')}
-						</div>
+	<div class="flex-1 min-h-0 overflow-y-auto scrollbar-hover pr-1.5">
+		{#if config}
+			<div class="flex flex-col">
+				<AdminSettingSection first>
+					<AdminSettingRow
+						label={$i18n.t('settings.admin.images.imageGeneration.label')}
+						description={$i18n.t('settings.admin.images.imageGeneration.description')}
+						let:labelId
+					>
+						<Switch bind:state={config.ENABLE_IMAGE_GENERATION} ariaLabelledbyId={labelId} />
+					</AdminSettingRow>
+				</AdminSettingSection>
 
-						<div class="px-1">
-							<Switch
-								bind:state={config.enabled}
-								on:change={(e) => {
-									const enabled = e.detail;
-
-									if (enabled) {
-										if (
-											config.engine === 'automatic1111' &&
-											config.automatic1111.AUTOMATIC1111_BASE_URL === ''
-										) {
-											toast.error($i18n.t('AUTOMATIC1111 Base URL is required.'));
-											config.enabled = false;
-										} else if (
-											config.engine === 'comfyui' &&
-											config.comfyui.COMFYUI_BASE_URL === ''
-										) {
-											toast.error($i18n.t('ComfyUI Base URL is required.'));
-											config.enabled = false;
-										} else if (config.engine === 'openai' && config.openai.OPENAI_API_KEY === '') {
-											toast.error($i18n.t('OpenAI API Key is required.'));
-											config.enabled = false;
-										} else if (config.engine === 'gemini' && config.gemini.GEMINI_API_KEY === '') {
-											toast.error($i18n.t('Gemini API Key is required.'));
-											config.enabled = false;
-										}
-									}
-
-									updateConfigHandler();
-								}}
-							/>
-						</div>
-					</div>
-				</div>
-
-				{#if config.enabled}
-					<div class=" py-1 flex w-full justify-between">
-						<div class=" self-center text-xs font-medium">{$i18n.t('Image Prompt Generation')}</div>
-						<div class="px-1">
-							<Switch bind:state={config.prompt_generation} />
-						</div>
-					</div>
-				{/if}
-
-				<div class=" py-1 flex w-full justify-between">
-					<div class=" self-center text-xs font-medium">{$i18n.t('Image Generation Engine')}</div>
-					<div class="flex items-center relative">
-						<select
-							class=" dark:bg-gray-900 w-fit pr-8 cursor-pointer rounded-sm px-2 p-1 text-xs bg-transparent outline-hidden text-right"
-							bind:value={config.engine}
+				<AdminSettingSection title={$i18n.t('settings.admin.images.sections.createImage.title')}>
+					<AdminSettingRow
+						label={$i18n.t('settings.admin.images.imageGenerationEngine.label')}
+						description={$i18n.t('settings.admin.images.imageGenerationEngine.description')}
+					>
+						<SettingsSelect
+							bind:value={config.IMAGE_GENERATION_ENGINE}
 							placeholder={$i18n.t('Select Engine')}
-							on:change={async () => {
-								updateConfigHandler();
-							}}
 						>
 							<option value="openai">{$i18n.t('Default (Open AI)')}</option>
 							<option value="comfyui">{$i18n.t('ComfyUI')}</option>
 							<option value="automatic1111">{$i18n.t('Automatic1111')}</option>
 							<option value="gemini">{$i18n.t('Gemini')}</option>
-						</select>
-					</div>
-				</div>
-			</div>
-			<hr class=" border-gray-100 dark:border-gray-850" />
+						</SettingsSelect>
+					</AdminSettingRow>
 
-			<div class="flex flex-col gap-2">
-				{#if (config?.engine ?? 'automatic1111') === 'automatic1111'}
-					<div>
-						<div class=" mb-2 text-sm font-medium">{$i18n.t('AUTOMATIC1111 Base URL')}</div>
-						<div class="flex w-full">
-							<div class="flex-1 mr-2">
-								<input
-									class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
-									placeholder={$i18n.t('Enter URL (e.g. http://127.0.0.1:7860/)')}
-									bind:value={config.automatic1111.AUTOMATIC1111_BASE_URL}
-								/>
-							</div>
-							<button
-								class="px-2.5 bg-gray-50 hover:bg-gray-100 text-gray-800 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-100 rounded-lg transition"
-								type="button"
-								on:click={async () => {
-									await updateConfigHandler();
-									const res = await verifyConfigUrl(localStorage.token).catch((error) => {
-										toast.error(`${error}`);
-										return null;
-									});
-
-									if (res) {
-										toast.success($i18n.t('Server connection verified'));
-									}
-								}}
+					{#if config.ENABLE_IMAGE_GENERATION}
+						<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+							<AdminSettingField
+								label={$i18n.t('settings.admin.images.imageGenerationModel.label')}
 							>
-								<svg
-									xmlns="http://www.w3.org/2000/svg"
-									viewBox="0 0 20 20"
-									fill="currentColor"
-									class="w-4 h-4"
-								>
-									<path
-										fill-rule="evenodd"
-										d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466l-.312-.311h2.433a.75.75 0 000-1.5H3.989a.75.75 0 00-.75.75v4.242a.75.75 0 001.5 0v-2.43l.31.31a7 7 0 0011.712-3.138.75.75 0 00-1.449-.39zm1.23-3.723a.75.75 0 00.219-.53V2.929a.75.75 0 00-1.5 0V5.36l-.31-.31A7 7 0 003.239 8.188a.75.75 0 101.448.389A5.5 5.5 0 0113.89 6.11l.311.31h-2.432a.75.75 0 000 1.5h4.243a.75.75 0 00.53-.219z"
-										clip-rule="evenodd"
-									/>
-								</svg>
-							</button>
-						</div>
-
-						<div class="mt-2 text-xs text-gray-400 dark:text-gray-500">
-							{$i18n.t('Include `--api` flag when running stable-diffusion-webui')}
-							<a
-								class=" text-gray-300 font-medium"
-								href="https://github.com/AUTOMATIC1111/stable-diffusion-webui/discussions/3734"
-								target="_blank"
-							>
-								{$i18n.t('(e.g. `sh webui.sh --api`)')}
-							</a>
-						</div>
-					</div>
-
-					<div>
-						<div class=" mb-2 text-sm font-medium">
-							{$i18n.t('AUTOMATIC1111 Api Auth String')}
-						</div>
-						<SensitiveInput
-							placeholder={$i18n.t('Enter api auth string (e.g. username:password)')}
-							bind:value={config.automatic1111.AUTOMATIC1111_API_AUTH}
-							required={false}
-						/>
-
-						<div class="mt-2 text-xs text-gray-400 dark:text-gray-500">
-							{$i18n.t('Include `--api-auth` flag when running stable-diffusion-webui')}
-							<a
-								class=" text-gray-300 font-medium"
-								href="https://github.com/AUTOMATIC1111/stable-diffusion-webui/discussions/13993"
-								target="_blank"
-							>
-								{$i18n
-									.t('(e.g. `sh webui.sh --api --api-auth username_password`)')
-									.replace('_', ':')}
-							</a>
-						</div>
-					</div>
-
-					<!---Sampler-->
-					<div>
-						<div class=" mb-2.5 text-sm font-medium">{$i18n.t('Set Sampler')}</div>
-						<div class="flex w-full">
-							<div class="flex-1 mr-2">
-								<Tooltip content={$i18n.t('Enter Sampler (e.g. Euler a)')} placement="top-start">
-									<input
-										list="sampler-list"
-										class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
-										placeholder={$i18n.t('Enter Sampler (e.g. Euler a)')}
-										bind:value={config.automatic1111.AUTOMATIC1111_SAMPLER}
-									/>
-
-									<datalist id="sampler-list">
-										{#each samplers ?? [] as sampler}
-											<option value={sampler}>{sampler}</option>
-										{/each}
-									</datalist>
-								</Tooltip>
-							</div>
-						</div>
-					</div>
-					<!---Scheduler-->
-					<div>
-						<div class=" mb-2.5 text-sm font-medium">{$i18n.t('Set Scheduler')}</div>
-						<div class="flex w-full">
-							<div class="flex-1 mr-2">
-								<Tooltip content={$i18n.t('Enter Scheduler (e.g. Karras)')} placement="top-start">
-									<input
-										list="scheduler-list"
-										class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
-										placeholder={$i18n.t('Enter Scheduler (e.g. Karras)')}
-										bind:value={config.automatic1111.AUTOMATIC1111_SCHEDULER}
-									/>
-
-									<datalist id="scheduler-list">
-										{#each schedulers ?? [] as scheduler}
-											<option value={scheduler}>{scheduler}</option>
-										{/each}
-									</datalist>
-								</Tooltip>
-							</div>
-						</div>
-					</div>
-					<!---CFG scale-->
-					<div>
-						<div class=" mb-2.5 text-sm font-medium">{$i18n.t('Set CFG Scale')}</div>
-						<div class="flex w-full">
-							<div class="flex-1 mr-2">
-								<Tooltip content={$i18n.t('Enter CFG Scale (e.g. 7.0)')} placement="top-start">
-									<input
-										class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
-										placeholder={$i18n.t('Enter CFG Scale (e.g. 7.0)')}
-										bind:value={config.automatic1111.AUTOMATIC1111_CFG_SCALE}
-									/>
-								</Tooltip>
-							</div>
-						</div>
-					</div>
-				{:else if config?.engine === 'comfyui'}
-					<div class="">
-						<div class=" mb-2 text-sm font-medium">{$i18n.t('ComfyUI Base URL')}</div>
-						<div class="flex w-full">
-							<div class="flex-1 mr-2">
 								<input
-									class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
-									placeholder={$i18n.t('Enter URL (e.g. http://127.0.0.1:7860/)')}
-									bind:value={config.comfyui.COMFYUI_BASE_URL}
-								/>
-							</div>
-							<button
-								class="px-2.5 bg-gray-50 hover:bg-gray-100 text-gray-800 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-100 rounded-lg transition"
-								type="button"
-								on:click={async () => {
-									await updateConfigHandler();
-									const res = await verifyConfigUrl(localStorage.token).catch((error) => {
-										toast.error(`${error}`);
-										return null;
-									});
-
-									if (res) {
-										toast.success($i18n.t('Server connection verified'));
-									}
-								}}
-							>
-								<svg
-									xmlns="http://www.w3.org/2000/svg"
-									viewBox="0 0 20 20"
-									fill="currentColor"
-									class="w-4 h-4"
-								>
-									<path
-										fill-rule="evenodd"
-										d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466l-.312-.311h2.433a.75.75 0 000-1.5H3.989a.75.75 0 00-.75.75v4.242a.75.75 0 001.5 0v-2.43l.31.31a7 7 0 0011.712-3.138.75.75 0 00-1.449-.39zm1.23-3.723a.75.75 0 00.219-.53V2.929a.75.75 0 00-1.5 0V5.36l-.31-.31A7 7 0 003.239 8.188a.75.75 0 101.448.389A5.5 5.5 0 0113.89 6.11l.311.31h-2.432a.75.75 0 000 1.5h4.243a.75.75 0 00.53-.219z"
-										clip-rule="evenodd"
-									/>
-								</svg>
-							</button>
-						</div>
-					</div>
-
-					<div class="">
-						<div class=" mb-2 text-sm font-medium">{$i18n.t('ComfyUI API Key')}</div>
-						<div class="flex w-full">
-							<div class="flex-1 mr-2">
-								<SensitiveInput
-									placeholder={$i18n.t('sk-1234')}
-									bind:value={config.comfyui.COMFYUI_API_KEY}
-									required={false}
-								/>
-							</div>
-						</div>
-					</div>
-
-					<div class="">
-						<div class=" mb-2 text-sm font-medium">{$i18n.t('ComfyUI Workflow')}</div>
-
-						{#if config.comfyui.COMFYUI_WORKFLOW}
-							<Textarea
-								class="w-full rounded-lg mb-1 py-2 px-4 text-xs bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden disabled:text-gray-600 resize-none"
-								rows="10"
-								bind:value={config.comfyui.COMFYUI_WORKFLOW}
-								required
-							/>
-						{/if}
-
-						<div class="flex w-full">
-							<div class="flex-1">
-								<input
-									id="upload-comfyui-workflow-input"
-									hidden
-									type="file"
-									accept=".json"
-									on:change={(e) => {
-										const file = e.target.files[0];
-										const reader = new FileReader();
-
-										reader.onload = (e) => {
-											config.comfyui.COMFYUI_WORKFLOW = e.target.result;
-											e.target.value = null;
-										};
-
-										reader.readAsText(file);
-									}}
-								/>
-
-								<button
-									class="w-full text-sm font-medium py-2 bg-transparent hover:bg-gray-50 border border-dashed border-gray-50 dark:border-gray-850 dark:hover:bg-gray-850 text-center rounded-xl"
-									type="button"
-									on:click={() => {
-										document.getElementById('upload-comfyui-workflow-input')?.click();
-									}}
-								>
-									{$i18n.t('Click here to upload a workflow.json file.')}
-								</button>
-							</div>
-						</div>
-
-						<div class="mt-2 text-xs text-gray-400 dark:text-gray-500">
-							{$i18n.t('Make sure to export a workflow.json file as API format from ComfyUI.')}
-						</div>
-					</div>
-
-					{#if config.comfyui.COMFYUI_WORKFLOW}
-						<div class="">
-							<div class=" mb-2 text-sm font-medium">{$i18n.t('ComfyUI Workflow Nodes')}</div>
-
-							<div class="text-xs flex flex-col gap-1.5">
-								{#each requiredWorkflowNodes as node}
-									<div class="flex w-full items-center">
-										<div class="shrink-0">
-											<div
-												class=" capitalize line-clamp-1 font-medium px-3 py-1 w-20 text-center bg-green-500/10 text-green-700 dark:text-green-200"
-											>
-												{node.type}{node.type === 'prompt' ? '*' : ''}
-											</div>
-										</div>
-										<div class="">
-											<Tooltip content={$i18n.t('Input Key (e.g. text, unet_name, steps)')}>
-												<input
-													class="py-1 px-3 w-24 text-xs text-center bg-transparent outline-hidden border-r border-gray-50 dark:border-gray-850"
-													placeholder={$i18n.t('Key')}
-													bind:value={node.key}
-													required
-												/>
-											</Tooltip>
-										</div>
-
-										<div class="w-full">
-											<Tooltip
-												content={$i18n.t('Comma separated Node Ids (e.g. 1 or 1,2)')}
-												placement="top-start"
-											>
-												<input
-													class="w-full py-1 px-4 text-xs bg-transparent outline-hidden"
-													placeholder={$i18n.t('Node Ids')}
-													bind:value={node.node_ids}
-												/>
-											</Tooltip>
-										</div>
-									</div>
-								{/each}
-							</div>
-
-							<div class="mt-2 text-xs text-right text-gray-400 dark:text-gray-500">
-								{$i18n.t('*Prompt node ID(s) are required for image generation')}
-							</div>
-						</div>
-					{/if}
-				{:else if config?.engine === 'openai'}
-					<div>
-						<div class=" mb-2 text-sm font-medium">{$i18n.t('OpenAI API Config')}</div>
-						<div class="flex w-full">
-							<div class="flex-1 mr-2">
-								<input
-									class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
-									placeholder={$i18n.t('API Base URL')}
-									bind:value={config.openai.OPENAI_API_BASE_URL}
+									list="model-list"
+									class={inputClass}
+									bind:value={config.IMAGE_GENERATION_MODEL}
+									placeholder={$i18n.t('Select a model')}
 									required
 								/>
-							</div>
-						</div>
-					</div>
 
-					<div>
-						<div class=" mb-2 text-sm font-medium">{$i18n.t('API Key')}</div>
-						<div class="flex w-full">
-							<div class="flex-1 mr-2">
-								<SensitiveInput
-									placeholder={$i18n.t('API Key')}
-									bind:value={config.openai.OPENAI_API_KEY}
-									required
-								/>
-							</div>
-						</div>
-					</div>
+								<datalist id="model-list">
+									{#each models ?? [] as model}
+										<option value={model.id}>{model.name}</option>
+									{/each}
+								</datalist>
+							</AdminSettingField>
 
-					<div>
-						<div class=" mb-2 text-sm font-medium">{$i18n.t('API Version')}</div>
-						<div class="flex w-full">
-							<div class="flex-1 mr-2">
+							<AdminSettingField label={$i18n.t('settings.admin.images.imageSize.label')}>
 								<input
-									class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
-									placeholder={$i18n.t('API Version')}
-									bind:value={config.openai.OPENAI_API_VERSION}
-								/>
-							</div>
-						</div>
-					</div>
-				{:else if config?.engine === 'gemini'}
-					<div>
-						<div class=" mb-1.5 text-sm font-medium">{$i18n.t('Gemini API Config')}</div>
-
-						<div class="flex gap-2 mb-1">
-							<input
-								class="flex-1 w-full text-sm bg-transparent outline-none"
-								placeholder={$i18n.t('API Base URL')}
-								bind:value={config.gemini.GEMINI_API_BASE_URL}
-								required
-							/>
-
-							<SensitiveInput
-								placeholder={$i18n.t('API Key')}
-								bind:value={config.gemini.GEMINI_API_KEY}
-							/>
-						</div>
-					</div>
-				{/if}
-			</div>
-
-			{#if config?.enabled}
-				<hr class=" border-gray-100 dark:border-gray-850" />
-
-				<div>
-					<div class=" mb-2.5 text-sm font-medium">{$i18n.t('Set Default Model')}</div>
-					<div class="flex w-full">
-						<div class="flex-1 mr-2">
-							<div class="flex w-full">
-								<div class="flex-1">
-									<Tooltip content={$i18n.t('Enter Model ID')} placement="top-start">
-										<input
-											list="model-list"
-											class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
-											bind:value={imageGenerationConfig.MODEL}
-											placeholder={$i18n.t('Select a model')}
-											required
-										/>
-
-										<datalist id="model-list">
-											{#each models ?? [] as model}
-												<option value={model.id}>{model.name}</option>
-											{/each}
-										</datalist>
-									</Tooltip>
-								</div>
-							</div>
-						</div>
-					</div>
-				</div>
-
-				<div>
-					<div class=" mb-2.5 text-sm font-medium">{$i18n.t('Set Image Size')}</div>
-					<div class="flex w-full">
-						<div class="flex-1 mr-2">
-							<Tooltip content={$i18n.t('Enter Image Size (e.g. 512x512)')} placement="top-start">
-								<input
-									class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+									class={inputClass}
 									placeholder={$i18n.t('Enter Image Size (e.g. 512x512)')}
-									bind:value={imageGenerationConfig.IMAGE_SIZE}
-									required
+									bind:value={config.IMAGE_SIZE}
 								/>
-							</Tooltip>
-						</div>
-					</div>
-				</div>
+							</AdminSettingField>
 
-				{#if ['comfyui', 'automatic1111', ''].includes(config?.engine)}
-					<div>
-						<div class=" mb-2.5 text-sm font-medium">{$i18n.t('Set Steps')}</div>
-						<div class="flex w-full">
-							<div class="flex-1 mr-2">
-								<Tooltip content={$i18n.t('Enter Number of Steps (e.g. 50)')} placement="top-start">
+							{#if ['comfyui', 'automatic1111', ''].includes(config?.IMAGE_GENERATION_ENGINE)}
+								<AdminSettingField label={$i18n.t('settings.admin.images.steps.label')}>
 									<input
-										class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+										class={inputClass}
 										placeholder={$i18n.t('Enter Number of Steps (e.g. 50)')}
-										bind:value={imageGenerationConfig.IMAGE_STEPS}
+										bind:value={config.IMAGE_STEPS}
 										required
 									/>
-								</Tooltip>
+								</AdminSettingField>
+							{/if}
+						</div>
+
+						<AdminSettingRow
+							label={$i18n.t('settings.admin.images.imagePromptGeneration.label')}
+							description={$i18n.t('settings.admin.images.imagePromptGeneration.description')}
+							let:labelId
+						>
+							<Switch
+								bind:state={config.ENABLE_IMAGE_PROMPT_GENERATION}
+								ariaLabelledbyId={labelId}
+							/>
+						</AdminSettingRow>
+					{/if}
+
+					{#if config?.IMAGE_GENERATION_ENGINE === 'openai'}
+						<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+							<AdminSettingField
+								label={$i18n.t('settings.admin.images.imagesOpenaiApiBaseUrl.label')}
+							>
+								<input
+									class={inputClass}
+									placeholder={$i18n.t('settings.admin.images.imagesOpenaiApiBaseUrl.label')}
+									bind:value={config.IMAGES_OPENAI_API_BASE_URL}
+								/>
+							</AdminSettingField>
+
+							<AdminSettingField label={$i18n.t('settings.admin.images.imagesOpenaiApiKey.label')}>
+								<SensitiveInput
+									variant="settings"
+									placeholder={$i18n.t('settings.admin.images.imagesOpenaiApiKey.label')}
+									bind:value={config.IMAGES_OPENAI_API_KEY}
+									required={false}
+								/>
+							</AdminSettingField>
+						</div>
+
+						<AdminSettingField
+							label={$i18n.t('settings.admin.images.imagesOpenaiApiVersion.label')}
+						>
+							<input
+								class={inputClass}
+								placeholder={$i18n.t('settings.admin.images.imagesOpenaiApiVersion.label')}
+								bind:value={config.IMAGES_OPENAI_API_VERSION}
+							/>
+						</AdminSettingField>
+
+						<AdminSettingField
+							label={$i18n.t('settings.admin.images.imagesOpenaiApiParams.label')}
+							description={$i18n.t('settings.admin.images.imagesOpenaiApiParams.description')}
+						>
+							<Textarea
+								className={textareaClass}
+								bind:value={config.IMAGES_OPENAI_API_PARAMS}
+								placeholder={$i18n.t('Enter additional parameters in JSON format')}
+								minSize={100}
+							/>
+						</AdminSettingField>
+					{:else if (config?.IMAGE_GENERATION_ENGINE ?? 'automatic1111') === 'automatic1111'}
+						<AdminSettingField
+							label={$i18n.t('settings.admin.images.automatic1111BaseUrl.label')}
+							description={$i18n.t('settings.admin.images.automatic1111BaseUrl.description')}
+						>
+							<div class="flex w-full gap-2">
+								<input
+									class={inputClass}
+									placeholder={$i18n.t('Enter URL (e.g. http://127.0.0.1:7860/)')}
+									bind:value={config.AUTOMATIC1111_BASE_URL}
+								/>
+								<button
+									class="shrink-0 text-gray-400 transition-colors hover:text-gray-900 dark:text-gray-600 dark:hover:text-white"
+									type="button"
+									aria-label={$i18n.t('settings.admin.images.verifyConnection.label')}
+									on:click={async () => {
+										const res = await verifyConnection(localStorage.token, {
+											engine: 'automatic1111',
+											url: config.AUTOMATIC1111_BASE_URL,
+											key: config.AUTOMATIC1111_API_AUTH
+										}).catch((error) => {
+											toast.error(`${error}`);
+											return null;
+										});
+
+										if (res) {
+											toast.success(
+												$i18n.t('settings.admin.images.serverConnectionVerified.label')
+											);
+										}
+									}}
+								>
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										viewBox="0 0 20 20"
+										fill="currentColor"
+										class="w-4 h-4"
+									>
+										<path
+											fill-rule="evenodd"
+											d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466l-.312-.311h2.433a.75.75 0 000-1.5H3.989a.75.75 0 00-.75.75v4.242a.75.75 0 001.5 0v-2.43l.31.31a7 7 0 0011.712-3.138.75.75 0 00-1.449-.39zm1.23-3.723a.75.75 0 00.219-.53V2.929a.75.75 0 00-1.5 0V5.36l-.31-.31A7 7 0 003.239 8.188a.75.75 0 101.448.389A5.5 5.5 0 0113.89 6.11l.311.31h-2.432a.75.75 0 000 1.5h4.243a.75.75 0 00.53-.219z"
+											clip-rule="evenodd"
+										/>
+									</svg>
+								</button>
+							</div>
+						</AdminSettingField>
+
+						<AdminSettingField
+							label={$i18n.t('settings.admin.images.apiAuthString.label')}
+							description={$i18n.t('settings.admin.images.apiAuthString.description')}
+						>
+							<SensitiveInput
+								variant="settings"
+								placeholder={$i18n.t('Enter api auth string (e.g. username:password)')}
+								bind:value={config.AUTOMATIC1111_API_AUTH}
+								required={false}
+							/>
+						</AdminSettingField>
+
+						<AdminSettingField
+							label={$i18n.t('settings.admin.images.automatic1111Params.label')}
+							description={$i18n.t('settings.admin.images.automatic1111Params.description')}
+						>
+							<Textarea
+								className={textareaClass}
+								bind:value={config.AUTOMATIC1111_PARAMS}
+								placeholder={$i18n.t('Enter additional parameters in JSON format')}
+								minSize={100}
+							/>
+						</AdminSettingField>
+					{:else if config?.IMAGE_GENERATION_ENGINE === 'comfyui'}
+						<AdminSettingField
+							label={$i18n.t('settings.admin.images.comfyuiBaseUrl.label')}
+							description={$i18n.t('settings.admin.images.comfyuiBaseUrl.description')}
+						>
+							<div class="flex w-full gap-2">
+								<input
+									class={inputClass}
+									placeholder={$i18n.t('Enter URL (e.g. http://127.0.0.1:7860/)')}
+									bind:value={config.COMFYUI_BASE_URL}
+								/>
+								<button
+									class="shrink-0 text-gray-400 transition-colors hover:text-gray-900 dark:text-gray-600 dark:hover:text-white"
+									type="button"
+									aria-label={$i18n.t('settings.admin.images.verifyConnection.label')}
+									on:click={async () => {
+										const res = await verifyConnection(localStorage.token, {
+											engine: 'comfyui',
+											url: config.COMFYUI_BASE_URL,
+											key: config.COMFYUI_API_KEY
+										}).catch((error) => {
+											toast.error(`${error}`);
+											return null;
+										});
+
+										if (res) {
+											toast.success(
+												$i18n.t('settings.admin.images.serverConnectionVerified.label')
+											);
+										}
+									}}
+								>
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										viewBox="0 0 20 20"
+										fill="currentColor"
+										class="w-4 h-4"
+									>
+										<path
+											fill-rule="evenodd"
+											d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466l-.312-.311h2.433a.75.75 0 000-1.5H3.989a.75.75 0 00-.75.75v4.242a.75.75 0 001.5 0v-2.43l.31.31a7 7 0 0011.712-3.138.75.75 0 00-1.449-.39zm1.23-3.723a.75.75 0 00.219-.53V2.929a.75.75 0 00-1.5 0V5.36l-.31-.31A7 7 0 003.239 8.188a.75.75 0 101.448.389A5.5 5.5 0 0113.89 6.11l.311.31h-2.432a.75.75 0 000 1.5h4.243a.75.75 0 00.53-.219z"
+											clip-rule="evenodd"
+										/>
+									</svg>
+								</button>
+							</div>
+						</AdminSettingField>
+
+						<AdminSettingField
+							label={$i18n.t('settings.admin.images.comfyuiApiKey.label')}
+							description={$i18n.t('settings.admin.images.comfyuiApiKey.description')}
+						>
+							<SensitiveInput
+								variant="settings"
+								placeholder={$i18n.t('sk-1234')}
+								bind:value={config.COMFYUI_API_KEY}
+								required={false}
+							/>
+						</AdminSettingField>
+
+						<div>
+							<input
+								id="upload-comfyui-workflow-input"
+								hidden
+								type="file"
+								accept=".json"
+								on:change={(e) => {
+									const file = e.target.files[0];
+									const reader = new FileReader();
+
+									reader.onload = (e) => {
+										config.COMFYUI_WORKFLOW = e.target.result;
+										e.target.value = null;
+									};
+
+									reader.readAsText(file);
+								}}
+							/>
+							<AdminSettingRow
+								label={$i18n.t('settings.admin.images.comfyuiComfyuiWorkflow.label')}
+								description={$i18n.t('settings.admin.images.comfyuiComfyuiWorkflow.description')}
+							>
+								<div class="flex items-center justify-end gap-2">
+									{#if config.COMFYUI_WORKFLOW}
+										<button
+											class="text-xs text-gray-500 transition-colors hover:text-gray-900 hover:underline dark:text-gray-500 dark:hover:text-white"
+											type="button"
+											aria-label={$i18n.t('settings.admin.images.editWorkflowJsonContent.label')}
+											on:click={() => {
+												// open code editor modal
+												showComfyUIWorkflowEditor = true;
+											}}
+										>
+											{$i18n.t('Edit')}
+										</button>
+									{/if}
+
+									<Tooltip
+										content={$i18n.t(
+											'settings.admin.images.clickHereToUploadAWorkflowJsonFile.label'
+										)}
+									>
+										<button
+											class="text-xs text-gray-500 transition-colors hover:text-gray-900 hover:underline dark:text-gray-500 dark:hover:text-white"
+											type="button"
+											aria-label={$i18n.t(
+												'settings.admin.images.clickHereToUploadAWorkflowJsonFile.label'
+											)}
+											on:click={() => {
+												document.getElementById('upload-comfyui-workflow-input')?.click();
+											}}
+										>
+											{$i18n.t('Upload')}
+										</button>
+									</Tooltip>
+								</div>
+							</AdminSettingRow>
+
+							<div>
+								<CodeEditorModal
+									bind:show={showComfyUIWorkflowEditor}
+									value={config.COMFYUI_WORKFLOW}
+									lang="json"
+									onChange={(e) => {
+										config.COMFYUI_WORKFLOW = e;
+									}}
+									onSave={() => {
+										console.log('Saved');
+									}}
+								/>
+								<!-- {#if config.COMFYUI_WORKFLOW}
+								<Textarea
+									className="my-1 w-full resize-none rounded-lg border border-gray-100/50 bg-gray-50/40 px-2 py-1.5 text-xs text-gray-700 outline-hidden transition-colors placeholder:text-gray-300 focus:border-blue-400 disabled:text-gray-600 dark:border-white/[0.04] dark:bg-white/[0.03] dark:text-gray-300 dark:placeholder:text-gray-700 dark:focus:border-blue-500"
+									rows="10"
+										bind:value={config.COMFYUI_WORKFLOW}
+									required
+								/>
+							{/if} -->
 							</div>
 						</div>
-					</div>
-				{/if}
-			{/if}
+
+						{#if config.COMFYUI_WORKFLOW}
+							<AdminSettingField
+								label={$i18n.t('settings.admin.images.generationWorkflowNodes.label')}
+								description={$i18n.t('settings.admin.images.generationWorkflowNodes.description')}
+							>
+								<div class="flex flex-col gap-1.5 text-xs">
+									{#each REQUIRED_WORKFLOW_NODES as node}
+										<div class="flex w-full flex-col">
+											<div class="shrink-0">
+												<div class=" capitalize line-clamp-1 w-20 text-gray-400 dark:text-gray-500">
+													{node.type}{node.type === 'prompt' ? '*' : ''}
+												</div>
+											</div>
+
+											<div class="flex mt-0.5 items-center">
+												<div class="">
+													<Tooltip content={$i18n.t('Input Key (e.g. text, unet_name, steps)')}>
+														<input
+															class="{inputClass} w-24"
+															placeholder={$i18n.t('Key')}
+															bind:value={node.key}
+															required
+														/>
+													</Tooltip>
+												</div>
+
+												<div class="px-2 text-gray-400 dark:text-gray-500">:</div>
+
+												<div class="w-full">
+													<Tooltip
+														content={$i18n.t('Comma separated Node Ids (e.g. 1 or 1,2)')}
+														placement="top-start"
+													>
+														<input
+															class={inputClass}
+															placeholder={$i18n.t('Node Ids')}
+															bind:value={node.node_ids}
+														/>
+													</Tooltip>
+												</div>
+											</div>
+										</div>
+									{/each}
+								</div>
+
+								<div class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+									{$i18n.t('*Prompt node ID(s) are required for image generation')}
+								</div>
+							</AdminSettingField>
+						{/if}
+					{:else if config?.IMAGE_GENERATION_ENGINE === 'gemini'}
+						<AdminSettingField
+							label={$i18n.t('settings.admin.images.imagesGeminiApiBaseUrl.label')}
+							description={$i18n.t('settings.admin.images.imagesGeminiApiBaseUrl.description')}
+						>
+							<input
+								class={inputClass}
+								placeholder={$i18n.t('settings.admin.images.imagesOpenaiApiBaseUrl.label')}
+								bind:value={config.IMAGES_GEMINI_API_BASE_URL}
+							/>
+						</AdminSettingField>
+
+						<AdminSettingField
+							label={$i18n.t('settings.admin.images.imagesGeminiApiKey.label')}
+							description={$i18n.t('settings.admin.images.imagesGeminiApiKey.description')}
+						>
+							<SensitiveInput
+								variant="settings"
+								placeholder={$i18n.t('settings.admin.images.imagesGeminiApiKey.label')}
+								bind:value={config.IMAGES_GEMINI_API_KEY}
+								required={true}
+							/>
+						</AdminSettingField>
+
+						<AdminSettingRow
+							label={$i18n.t('settings.admin.images.geminiEndpointMethod.label')}
+							description={$i18n.t('settings.admin.images.geminiEndpointMethod.description')}
+						>
+							<SettingsSelect
+								bind:value={config.IMAGES_GEMINI_ENDPOINT_METHOD}
+								placeholder={$i18n.t('Select Method')}
+							>
+								<option value="predict">predict</option>
+								<option value="generateContent">generateContent</option>
+							</SettingsSelect>
+						</AdminSettingRow>
+					{/if}
+				</AdminSettingSection>
+
+				<AdminSettingSection title={$i18n.t('settings.admin.images.sections.editImage.title')}>
+					<AdminSettingRow
+						label={$i18n.t('settings.admin.images.imageEdit.label')}
+						description={$i18n.t('settings.admin.images.imageEdit.description')}
+						let:labelId
+					>
+						<Switch bind:state={config.ENABLE_IMAGE_EDIT} ariaLabelledbyId={labelId} />
+					</AdminSettingRow>
+
+					<AdminSettingRow
+						label={$i18n.t('settings.admin.images.imageEditEngine.label')}
+						description={$i18n.t('settings.admin.images.imageEditEngine.description')}
+					>
+						<SettingsSelect
+							bind:value={config.IMAGE_EDIT_ENGINE}
+							placeholder={$i18n.t('Select Engine')}
+						>
+							<option value="openai">{$i18n.t('Default (Open AI)')}</option>
+							<option value="comfyui">{$i18n.t('ComfyUI')}</option>
+							<option value="gemini">{$i18n.t('Gemini')}</option>
+						</SettingsSelect>
+					</AdminSettingRow>
+
+					{#if config?.ENABLE_IMAGE_GENERATION && config?.ENABLE_IMAGE_EDIT}
+						<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+							<AdminSettingField label={$i18n.t('settings.admin.images.imageEditModel.label')}>
+								<input
+									list="model-list"
+									class={inputClass}
+									bind:value={config.IMAGE_EDIT_MODEL}
+									placeholder={$i18n.t('Select a model')}
+								/>
+
+								<datalist id="model-list">
+									{#each models ?? [] as model}
+										<option value={model.id}>{model.name}</option>
+									{/each}
+								</datalist>
+							</AdminSettingField>
+
+							<AdminSettingField label={$i18n.t('settings.admin.images.imageEditSize.label')}>
+								<input
+									class={inputClass}
+									placeholder={$i18n.t('Enter Image Size (e.g. 512x512)')}
+									bind:value={config.IMAGE_EDIT_SIZE}
+								/>
+							</AdminSettingField>
+						</div>
+					{/if}
+
+					{#if config?.IMAGE_EDIT_ENGINE === 'openai'}
+						<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+							<AdminSettingField
+								label={$i18n.t('settings.admin.images.imagesEditOpenaiApiBaseUrl.label')}
+							>
+								<input
+									class={inputClass}
+									placeholder={$i18n.t('settings.admin.images.imagesEditOpenaiApiBaseUrl.label')}
+									bind:value={config.IMAGES_EDIT_OPENAI_API_BASE_URL}
+								/>
+							</AdminSettingField>
+
+							<AdminSettingField
+								label={$i18n.t('settings.admin.images.imagesEditOpenaiApiKey.label')}
+							>
+								<SensitiveInput
+									variant="settings"
+									placeholder={$i18n.t('settings.admin.images.imagesEditOpenaiApiKey.label')}
+									bind:value={config.IMAGES_EDIT_OPENAI_API_KEY}
+									required={false}
+								/>
+							</AdminSettingField>
+						</div>
+
+						<AdminSettingField
+							label={$i18n.t('settings.admin.images.imagesEditOpenaiApiVersion.label')}
+						>
+							<input
+								class={inputClass}
+								placeholder={$i18n.t('settings.admin.images.imagesEditOpenaiApiVersion.label')}
+								bind:value={config.IMAGES_EDIT_OPENAI_API_VERSION}
+							/>
+						</AdminSettingField>
+					{:else if config?.IMAGE_EDIT_ENGINE === 'comfyui'}
+						<AdminSettingField
+							label={$i18n.t('settings.admin.images.imagesEditComfyuiBaseUrl.label')}
+							description={$i18n.t('settings.admin.images.imagesEditComfyuiBaseUrl.description')}
+						>
+							<div class="flex w-full gap-2">
+								<input
+									class={inputClass}
+									placeholder={$i18n.t('Enter URL (e.g. http://127.0.0.1:7860/)')}
+									bind:value={config.IMAGES_EDIT_COMFYUI_BASE_URL}
+								/>
+								<button
+									class="shrink-0 text-gray-400 transition-colors hover:text-gray-900 dark:text-gray-600 dark:hover:text-white"
+									type="button"
+									aria-label={$i18n.t('settings.admin.images.verifyConnection.label')}
+									on:click={async () => {
+										const res = await verifyConnection(localStorage.token, {
+											engine: 'comfyui',
+											url: config.IMAGES_EDIT_COMFYUI_BASE_URL,
+											key: config.IMAGES_EDIT_COMFYUI_API_KEY
+										}).catch((error) => {
+											toast.error(`${error}`);
+											return null;
+										});
+
+										if (res) {
+											toast.success(
+												$i18n.t('settings.admin.images.serverConnectionVerified.label')
+											);
+										}
+									}}
+								>
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										viewBox="0 0 20 20"
+										fill="currentColor"
+										class="w-4 h-4"
+									>
+										<path
+											fill-rule="evenodd"
+											d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466l-.312-.311h2.433a.75.75 0 000-1.5H3.989a.75.75 0 00-.75.75v4.242a.75.75 0 001.5 0v-2.43l.31.31a7 7 0 0011.712-3.138.75.75 0 00-1.449-.39zm1.23-3.723a.75.75 0 00.219-.53V2.929a.75.75 0 00-1.5 0V5.36l-.31-.31A7 7 0 003.239 8.188a.75.75 0 101.448.389A5.5 5.5 0 0113.89 6.11l.311.31h-2.432a.75.75 0 000 1.5h4.243a.75.75 0 00.53-.219z"
+											clip-rule="evenodd"
+										/>
+									</svg>
+								</button>
+							</div>
+						</AdminSettingField>
+
+						<AdminSettingField
+							label={$i18n.t('settings.admin.images.imagesEditComfyuiApiKey.label')}
+							description={$i18n.t('settings.admin.images.imagesEditComfyuiApiKey.description')}
+						>
+							<SensitiveInput
+								variant="settings"
+								placeholder={$i18n.t('sk-1234')}
+								bind:value={config.IMAGES_EDIT_COMFYUI_API_KEY}
+								required={false}
+							/>
+						</AdminSettingField>
+
+						<div>
+							<input
+								id="upload-comfyui-edit-workflow-input"
+								hidden
+								type="file"
+								accept=".json"
+								on:change={(e) => {
+									const file = e.target.files[0];
+									const reader = new FileReader();
+
+									reader.onload = (e) => {
+										config.IMAGES_EDIT_COMFYUI_WORKFLOW = e.target.result;
+										e.target.value = null;
+									};
+
+									reader.readAsText(file);
+								}}
+							/>
+							<AdminSettingRow
+								label={$i18n.t('settings.admin.images.comfyuiComfyuiWorkflow.label')}
+								description={$i18n.t('settings.admin.images.comfyuiComfyuiWorkflow.description')}
+							>
+								<div class="flex items-center justify-end gap-2">
+									{#if config.IMAGES_EDIT_COMFYUI_WORKFLOW}
+										<button
+											class="text-xs text-gray-500 transition-colors hover:text-gray-900 hover:underline dark:text-gray-500 dark:hover:text-white"
+											type="button"
+											aria-label={$i18n.t('settings.admin.images.editWorkflowJsonContent.label')}
+											on:click={() => {
+												// open code editor modal
+												showComfyUIEditWorkflowEditor = true;
+											}}
+										>
+											{$i18n.t('Edit')}
+										</button>
+									{/if}
+
+									<Tooltip
+										content={$i18n.t(
+											'settings.admin.images.clickHereToUploadAWorkflowJsonFile.label'
+										)}
+									>
+										<button
+											class="text-xs text-gray-500 transition-colors hover:text-gray-900 hover:underline dark:text-gray-500 dark:hover:text-white"
+											type="button"
+											aria-label={$i18n.t(
+												'settings.admin.images.clickHereToUploadAWorkflowJsonFile.label'
+											)}
+											on:click={() => {
+												document.getElementById('upload-comfyui-edit-workflow-input')?.click();
+											}}
+										>
+											{$i18n.t('Upload')}
+										</button>
+									</Tooltip>
+								</div>
+							</AdminSettingRow>
+
+							<CodeEditorModal
+								bind:show={showComfyUIEditWorkflowEditor}
+								value={config.IMAGES_EDIT_COMFYUI_WORKFLOW}
+								lang="json"
+								onChange={(e) => {
+									config.IMAGES_EDIT_COMFYUI_WORKFLOW = e;
+								}}
+								onSave={() => {
+									console.log('Saved');
+								}}
+							/>
+						</div>
+
+						{#if config.IMAGES_EDIT_COMFYUI_WORKFLOW}
+							<AdminSettingField
+								label={$i18n.t('settings.admin.images.editingWorkflowNodes.label')}
+								description={$i18n.t('settings.admin.images.editingWorkflowNodes.description')}
+							>
+								<div class="flex flex-col gap-1.5 text-xs">
+									{#each REQUIRED_EDIT_WORKFLOW_NODES as node}
+										<div class="flex w-full flex-col">
+											<div class="shrink-0">
+												<div class=" capitalize line-clamp-1 w-20 text-gray-400 dark:text-gray-500">
+													{node.type}{['prompt', 'image'].includes(node.type) ? '*' : ''}
+												</div>
+											</div>
+
+											<div class="flex mt-0.5 items-center">
+												<div class="">
+													<Tooltip content={$i18n.t('Input Key (e.g. text, unet_name, steps)')}>
+														<input
+															class="{inputClass} w-24"
+															placeholder={$i18n.t('Key')}
+															bind:value={node.key}
+															required
+														/>
+													</Tooltip>
+												</div>
+
+												<div class="px-2 text-gray-400 dark:text-gray-500">:</div>
+
+												<div class="w-full">
+													<Tooltip
+														content={$i18n.t('Comma separated Node Ids (e.g. 1 or 1,2)')}
+														placement="top-start"
+													>
+														<input
+															class={inputClass}
+															placeholder={$i18n.t('Node Ids')}
+															bind:value={node.node_ids}
+														/>
+													</Tooltip>
+												</div>
+											</div>
+										</div>
+									{/each}
+								</div>
+
+								<div class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+									{$i18n.t('*Prompt node ID(s) are required for image generation')}
+								</div>
+							</AdminSettingField>
+						{/if}
+					{:else if config?.IMAGE_EDIT_ENGINE === 'gemini'}
+						<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+							<AdminSettingField
+								label={$i18n.t('settings.admin.images.imagesEditGeminiApiBaseUrl.label')}
+							>
+								<input
+									class={inputClass}
+									placeholder={$i18n.t('settings.admin.images.imagesOpenaiApiBaseUrl.label')}
+									bind:value={config.IMAGES_EDIT_GEMINI_API_BASE_URL}
+								/>
+							</AdminSettingField>
+
+							<AdminSettingField
+								label={$i18n.t('settings.admin.images.imagesEditGeminiApiKey.label')}
+							>
+								<SensitiveInput
+									variant="settings"
+									placeholder={$i18n.t('settings.admin.images.imagesEditGeminiApiKey.label')}
+									bind:value={config.IMAGES_EDIT_GEMINI_API_KEY}
+									required={true}
+								/>
+							</AdminSettingField>
+						</div>
+					{/if}
+				</AdminSettingSection>
+			</div>
 		{/if}
 	</div>
 
-	<div class="flex justify-end pt-3 text-sm font-medium">
+	<div class="flex justify-end pt-6 text-sm font-normal">
 		<button
-			class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex flex-row space-x-1 items-center {loading
-				? ' cursor-not-allowed'
-				: ''}"
+			class="flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-gray-900 px-2.5 text-xs font-normal text-white transition hover:bg-black disabled:opacity-60 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white disabled:cursor-not-allowed"
 			type="submit"
 			disabled={loading}
 		>
 			{$i18n.t('Save')}
 
 			{#if loading}
-				<div class="ml-2 self-center">
-					<Spinner />
-				</div>
+				<span class="shrink-0">
+					<Spinner className="size-3" />
+				</span>
 			{/if}
 		</button>
 	</div>

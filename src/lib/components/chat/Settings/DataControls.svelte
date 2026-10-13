@@ -1,29 +1,21 @@
 <script lang="ts">
+	import { canManageChats } from '$lib/utils/settings-access';
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
 
-	import {
-		chats,
-		user,
-		settings,
-		scrollPaginationEnabled,
-		currentChatPage,
-		pinnedChats
-	} from '$lib/stores';
+	import { user } from '$lib/stores';
+	import { refreshSidebar } from '$lib/stores/chatList';
 
-	import {
-		archiveAllChats,
-		deleteAllChats,
-		getAllChats,
-		getChatList,
-		importChat,
-		getPinnedChatList
-	} from '$lib/apis/chats';
+	import { archiveAllChats, deleteAllChats, getAllChats, importChats } from '$lib/apis/chats';
 	import { getImportOrigin, convertOpenAIChats } from '$lib/utils';
-	import { onMount, getContext } from 'svelte';
+	import { getContext } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
-	import ArchivedChatsModal from '$lib/components/layout/ArchivedChatsModal.svelte';
+	import SharedChatsModal from '$lib/components/layout/SharedChatsModal.svelte';
+	import FilesModal from '$lib/components/layout/FilesModal.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import UserSettingRow from './UserSettingRow.svelte';
+	import UserSettingSection from './UserSettingSection.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -32,11 +24,14 @@
 	// Chats
 	let importFiles;
 
-	let showArchiveConfirm = false;
-	let showDeleteConfirm = false;
-	let showArchivedChatsModal = false;
+	let showArchiveConfirmDialog = false;
+	let showDeleteConfirmDialog = false;
+	let showSharedChatsModal = false;
+	let showFilesModal = false;
 
 	let chatImportInputElement: HTMLInputElement;
+	const actionButtonClass =
+		'text-xs text-gray-500 transition-colors hover:text-gray-900 dark:text-gray-500 dark:hover:text-white';
 
 	$: if (importFiles) {
 		console.log(importFiles);
@@ -52,7 +47,7 @@
 					console.log('Unable to import chats:', error);
 				}
 			}
-			importChats(chats);
+			importChatsHandler(chats);
 		};
 
 		if (importFiles.length > 0) {
@@ -60,30 +55,39 @@
 		}
 	}
 
-	const importChats = async (_chats) => {
-		for (const chat of _chats) {
-			console.log(chat);
-
-			if (chat.chat) {
-				await importChat(
-					localStorage.token,
-					chat.chat,
-					chat.meta ?? {},
-					false,
-					null,
-					chat?.created_at ?? null,
-					chat?.updated_at ?? null
-				);
-			} else {
-				// Legacy format
-				await importChat(localStorage.token, chat, {}, false, null);
-			}
+	const importChatsHandler = async (_chats) => {
+		const res = await importChats(
+			localStorage.token,
+			_chats.map((chat) => {
+				if (chat.chat) {
+					return {
+						chat: chat.chat,
+						meta: chat.meta ?? {},
+						variables: chat?.variables ?? {},
+						pinned: chat?.pinned ?? false,
+						archived: chat?.archived ?? false,
+						folder_id: chat?.folder_id ?? null,
+						created_at: chat?.created_at ?? null,
+						updated_at: chat?.updated_at ?? null
+					};
+				} else {
+					// Legacy format
+					return {
+						chat: chat,
+						meta: {},
+						pinned: false,
+						folder_id: null,
+						created_at: chat?.created_at ?? null,
+						updated_at: chat?.updated_at ?? null
+					};
+				}
+			})
+		);
+		if (res) {
+			toast.success(`Successfully imported ${res.length} chats.`);
 		}
 
-		currentChatPage.set(1);
-		await chats.set(await getChatList(localStorage.token, $currentChatPage));
-		pinnedChats.set(await getPinnedChatList(localStorage.token));
-		scrollPaginationEnabled.set(true);
+		await refreshSidebar(localStorage.token);
 	};
 
 	const exportChats = async () => {
@@ -95,296 +99,164 @@
 
 	const archiveAllChatsHandler = async () => {
 		await goto('/');
-		await archiveAllChats(localStorage.token).catch((error) => {
+		const success = await archiveAllChats(localStorage.token).catch((error) => {
 			toast.error(`${error}`);
 		});
+		if (!success) return;
 
-		currentChatPage.set(1);
-		await chats.set(await getChatList(localStorage.token, $currentChatPage));
-		pinnedChats.set([]);
-		scrollPaginationEnabled.set(true);
+		await refreshSidebar(localStorage.token);
 	};
 
 	const deleteAllChatsHandler = async () => {
 		await goto('/');
-		await deleteAllChats(localStorage.token).catch((error) => {
+		const success = await deleteAllChats(localStorage.token).catch((error) => {
 			toast.error(`${error}`);
 		});
+		if (!success) return;
 
-		currentChatPage.set(1);
-		await chats.set(await getChatList(localStorage.token, $currentChatPage));
-		scrollPaginationEnabled.set(true);
-	};
-
-	const handleArchivedChatsChange = async () => {
-		currentChatPage.set(1);
-		await chats.set(await getChatList(localStorage.token, $currentChatPage));
-
-		scrollPaginationEnabled.set(true);
+		await refreshSidebar(localStorage.token);
 	};
 </script>
 
-<ArchivedChatsModal bind:show={showArchivedChatsModal} onUpdate={handleArchivedChatsChange} />
+<SharedChatsModal bind:show={showSharedChatsModal} />
+<FilesModal bind:show={showFilesModal} />
 
-<div id="tab-chats" class="flex flex-col h-full justify-between space-y-3 text-sm">
-	<div class=" space-y-2 overflow-y-scroll max-h-[28rem] md:max-h-full">
-		<div class="flex flex-col">
-			<input
-				id="chat-import-input"
-				bind:this={chatImportInputElement}
-				bind:files={importFiles}
-				type="file"
-				accept=".json"
-				hidden
-			/>
-			<button
-				class=" flex rounded-md py-2 px-3.5 w-full hover:bg-gray-200 dark:hover:bg-gray-800 transition"
-				on:click={() => {
-					chatImportInputElement.click();
-				}}
-			>
-				<div class=" self-center mr-3">
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						viewBox="0 0 16 16"
-						fill="currentColor"
-						class="w-4 h-4"
+<ConfirmDialog
+	title={$i18n.t('settings.personal.dataControls.archiveAllChats.label')}
+	message={$i18n.t('Are you sure you want to archive all chats? This action cannot be undone.')}
+	bind:show={showArchiveConfirmDialog}
+	on:confirm={archiveAllChatsHandler}
+	on:cancel={() => {
+		showArchiveConfirmDialog = false;
+	}}
+/>
+
+<ConfirmDialog
+	title={$i18n.t('settings.personal.dataControls.deleteAllChats.label')}
+	message={$i18n.t('Are you sure you want to delete all chats? This action cannot be undone.')}
+	bind:show={showDeleteConfirmDialog}
+	on:confirm={deleteAllChatsHandler}
+	on:cancel={() => {
+		showDeleteConfirmDialog = false;
+	}}
+/>
+
+<div id="tab-chats" class="flex flex-col h-full text-sm">
+	<h2 class="text-sm font-medium text-gray-900 dark:text-white mb-4">
+		{$i18n.t('settings.personal.dataControls.title')}
+	</h2>
+
+	<div class="flex-1 min-h-0 overflow-y-auto scrollbar-hover pr-1.5">
+		<input
+			id="chat-import-input"
+			bind:this={chatImportInputElement}
+			bind:files={importFiles}
+			type="file"
+			accept=".json"
+			hidden
+		/>
+
+		<UserSettingSection
+			title={$i18n.t('settings.personal.dataControls.sections.chats.title')}
+			first
+		>
+			{#if canManageChats({ user: $user, config: null }, 'import')}
+				<UserSettingRow
+					label={$i18n.t('settings.personal.dataControls.importChats.label')}
+					description={$i18n.t('settings.personal.dataControls.importChats.description')}
+				>
+					<button
+						class={actionButtonClass}
+						on:click={() => {
+							chatImportInputElement.click();
+						}}
+						type="button"
 					>
-						<path
-							fill-rule="evenodd"
-							d="M4 2a1.5 1.5 0 0 0-1.5 1.5v9A1.5 1.5 0 0 0 4 14h8a1.5 1.5 0 0 0 1.5-1.5V6.621a1.5 1.5 0 0 0-.44-1.06L9.94 2.439A1.5 1.5 0 0 0 8.878 2H4Zm4 9.5a.75.75 0 0 1-.75-.75V8.06l-.72.72a.75.75 0 0 1-1.06-1.06l2-2a.75.75 0 0 1 1.06 0l2 2a.75.75 0 1 1-1.06 1.06l-.72-.72v2.69a.75.75 0 0 1-.75.75Z"
-							clip-rule="evenodd"
-						/>
-					</svg>
-				</div>
-				<div class=" self-center text-sm font-medium">{$i18n.t('Import Chats')}</div>
-			</button>
-
-			{#if $user?.role === 'admin' || ($user.permissions?.chat?.export ?? true)}
-				<button
-					class=" flex rounded-md py-2 px-3.5 w-full hover:bg-gray-200 dark:hover:bg-gray-800 transition"
-					on:click={() => {
-						exportChats();
-					}}
-				>
-					<div class=" self-center mr-3">
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							viewBox="0 0 16 16"
-							fill="currentColor"
-							class="w-4 h-4"
-						>
-							<path
-								fill-rule="evenodd"
-								d="M4 2a1.5 1.5 0 0 0-1.5 1.5v9A1.5 1.5 0 0 0 4 14h8a1.5 1.5 0 0 0 1.5-1.5V6.621a1.5 1.5 0 0 0-.44-1.06L9.94 2.439A1.5 1.5 0 0 0 8.878 2H4Zm4 3.5a.75.75 0 0 1 .75.75v2.69l.72-.72a.75.75 0 1 1 1.06 1.06l-2 2a.75.75 0 0 1-1.06 0l-2-2a.75.75 0 0 1 1.06-1.06l.72.72V6.25A.75.75 0 0 1 8 5.5Z"
-								clip-rule="evenodd"
-							/>
-						</svg>
-					</div>
-					<div class=" self-center text-sm font-medium">{$i18n.t('Export Chats')}</div>
-				</button>
+						{$i18n.t('Import')}
+					</button>
+				</UserSettingRow>
 			{/if}
-		</div>
 
-		<hr class=" border-gray-100 dark:border-gray-850" />
-
-		<div class="flex flex-col">
-			<button
-				class=" flex rounded-md py-2 px-3.5 w-full hover:bg-gray-200 dark:hover:bg-gray-800 transition"
-				on:click={() => {
-					showArchivedChatsModal = true;
-				}}
-			>
-				<div class=" self-center mr-3">
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						viewBox="0 0 24 24"
-						fill="currentColor"
-						class="size-4"
+			{#if canManageChats({ user: $user, config: null }, 'export')}
+				<UserSettingRow
+					label={$i18n.t('settings.personal.dataControls.exportChats.label')}
+					description={$i18n.t('settings.personal.dataControls.exportChats.description')}
+				>
+					<button
+						class={actionButtonClass}
+						on:click={() => {
+							exportChats();
+						}}
+						type="button"
 					>
-						<path
-							d="M3.375 3C2.339 3 1.5 3.84 1.5 4.875v.75c0 1.036.84 1.875 1.875 1.875h17.25c1.035 0 1.875-.84 1.875-1.875v-.75C22.5 3.839 21.66 3 20.625 3H3.375Z"
-						/>
-						<path
-							fill-rule="evenodd"
-							d="m3.087 9 .54 9.176A3 3 0 0 0 6.62 21h10.757a3 3 0 0 0 2.995-2.824L20.913 9H3.087ZM12 10.5a.75.75 0 0 1 .75.75v4.94l1.72-1.72a.75.75 0 1 1 1.06 1.06l-3 3a.75.75 0 0 1-1.06 0l-3-3a.75.75 0 1 1 1.06-1.06l1.72 1.72v-4.94a.75.75 0 0 1 .75-.75Z"
-							clip-rule="evenodd"
-						/>
-					</svg>
-				</div>
-				<div class=" self-center text-sm font-medium">{$i18n.t('Archived Chats')}</div>
-			</button>
-
-			{#if showArchiveConfirm}
-				<div class="flex justify-between rounded-md items-center py-2 px-3.5 w-full transition">
-					<div class="flex items-center space-x-3">
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							viewBox="0 0 16 16"
-							fill="currentColor"
-							class="w-4 h-4"
-						>
-							<path d="M2 3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3Z" />
-							<path
-								fill-rule="evenodd"
-								d="M13 6H3v6a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V6ZM5.72 7.47a.75.75 0 0 1 1.06 0L8 8.69l1.22-1.22a.75.75 0 1 1 1.06 1.06L9.06 9.75l1.22 1.22a.75.75 0 1 1-1.06 1.06L8 10.81l-1.22 1.22a.75.75 0 0 1-1.06-1.06l1.22-1.22-1.22-1.22a.75.75 0 0 1 0-1.06Z"
-								clip-rule="evenodd"
-							/>
-						</svg>
-						<span>{$i18n.t('Are you sure?')}</span>
-					</div>
-
-					<div class="flex space-x-1.5 items-center">
-						<button
-							class="hover:text-white transition"
-							on:click={() => {
-								archiveAllChatsHandler();
-								showArchiveConfirm = false;
-							}}
-						>
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								viewBox="0 0 20 20"
-								fill="currentColor"
-								class="w-4 h-4"
-							>
-								<path
-									fill-rule="evenodd"
-									d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z"
-									clip-rule="evenodd"
-								/>
-							</svg>
-						</button>
-						<button
-							class="hover:text-white transition"
-							on:click={() => {
-								showArchiveConfirm = false;
-							}}
-						>
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								viewBox="0 0 20 20"
-								fill="currentColor"
-								class="w-4 h-4"
-							>
-								<path
-									d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
-								/>
-							</svg>
-						</button>
-					</div>
-				</div>
-			{:else}
-				<button
-					class=" flex rounded-md py-2 px-3.5 w-full hover:bg-gray-200 dark:hover:bg-gray-800 transition"
-					on:click={() => {
-						showArchiveConfirm = true;
-					}}
-				>
-					<div class=" self-center mr-3">
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							viewBox="0 0 24 24"
-							fill="currentColor"
-							class="size-4"
-						>
-							<path
-								d="M3.375 3C2.339 3 1.5 3.84 1.5 4.875v.75c0 1.036.84 1.875 1.875 1.875h17.25c1.035 0 1.875-.84 1.875-1.875v-.75C22.5 3.839 21.66 3 20.625 3H3.375Z"
-							/>
-							<path
-								fill-rule="evenodd"
-								d="m3.087 9 .54 9.176A3 3 0 0 0 6.62 21h10.757a3 3 0 0 0 2.995-2.824L20.913 9H3.087Zm6.163 3.75A.75.75 0 0 1 10 12h4a.75.75 0 0 1 0 1.5h-4a.75.75 0 0 1-.75-.75Z"
-								clip-rule="evenodd"
-							/>
-						</svg>
-					</div>
-					<div class=" self-center text-sm font-medium">{$i18n.t('Archive All Chats')}</div>
-				</button>
+						{$i18n.t('Export')}
+					</button>
+				</UserSettingRow>
 			{/if}
 
-			{#if showDeleteConfirm}
-				<div class="flex justify-between rounded-md items-center py-2 px-3.5 w-full transition">
-					<div class="flex items-center space-x-3">
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							viewBox="0 0 16 16"
-							fill="currentColor"
-							class="w-4 h-4"
-						>
-							<path d="M2 3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3Z" />
-							<path
-								fill-rule="evenodd"
-								d="M13 6H3v6a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V6ZM5.72 7.47a.75.75 0 0 1 1.06 0L8 8.69l1.22-1.22a.75.75 0 1 1 1.06 1.06L9.06 9.75l1.22 1.22a.75.75 0 1 1-1.06 1.06L8 10.81l-1.22 1.22a.75.75 0 0 1-1.06-1.06l1.22-1.22-1.22-1.22a.75.75 0 0 1 0-1.06Z"
-								clip-rule="evenodd"
-							/>
-						</svg>
-						<span>{$i18n.t('Are you sure?')}</span>
-					</div>
-
-					<div class="flex space-x-1.5 items-center">
-						<button
-							class="hover:text-white transition"
-							on:click={() => {
-								deleteAllChatsHandler();
-								showDeleteConfirm = false;
-							}}
-						>
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								viewBox="0 0 20 20"
-								fill="currentColor"
-								class="w-4 h-4"
-							>
-								<path
-									fill-rule="evenodd"
-									d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z"
-									clip-rule="evenodd"
-								/>
-							</svg>
-						</button>
-						<button
-							class="hover:text-white transition"
-							on:click={() => {
-								showDeleteConfirm = false;
-							}}
-						>
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								viewBox="0 0 20 20"
-								fill="currentColor"
-								class="w-4 h-4"
-							>
-								<path
-									d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
-								/>
-							</svg>
-						</button>
-					</div>
-				</div>
-			{:else}
+			<UserSettingRow
+				label={$i18n.t('settings.personal.dataControls.sharedChats.label')}
+				description={$i18n.t('settings.personal.dataControls.sharedChats.description')}
+			>
 				<button
-					class=" flex rounded-md py-2 px-3.5 w-full hover:bg-gray-200 dark:hover:bg-gray-800 transition"
+					class={actionButtonClass}
 					on:click={() => {
-						showDeleteConfirm = true;
+						showSharedChatsModal = true;
 					}}
+					type="button"
 				>
-					<div class=" self-center mr-3">
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							viewBox="0 0 16 16"
-							fill="currentColor"
-							class="w-4 h-4"
-						>
-							<path
-								fill-rule="evenodd"
-								d="M4 2a1.5 1.5 0 0 0-1.5 1.5v9A1.5 1.5 0 0 0 4 14h8a1.5 1.5 0 0 0 1.5-1.5V6.621a1.5 1.5 0 0 0-.44-1.06L9.94 2.439A1.5 1.5 0 0 0 8.878 2H4Zm7 7a.75.75 0 0 1-.75.75h-4.5a.75.75 0 0 1 0-1.5h4.5A.75.75 0 0 1 11 9Z"
-								clip-rule="evenodd"
-							/>
-						</svg>
-					</div>
-					<div class=" self-center text-sm font-medium">{$i18n.t('Delete All Chats')}</div>
+					{$i18n.t('Manage')}
 				</button>
+			</UserSettingRow>
+
+			<UserSettingRow
+				label={$i18n.t('settings.personal.dataControls.archiveAllChats.label')}
+				description={$i18n.t('settings.personal.dataControls.archiveAllChats.description')}
+			>
+				<button
+					class={actionButtonClass}
+					on:click={() => {
+						showArchiveConfirmDialog = true;
+					}}
+					type="button"
+				>
+					{$i18n.t('settings.personal.dataControls.archiveAll.label')}
+				</button>
+			</UserSettingRow>
+
+			{#if canManageChats({ user: $user, config: null }, 'delete')}
+				<UserSettingRow
+					label={$i18n.t('settings.personal.dataControls.deleteAllChats.label')}
+					description={$i18n.t('settings.personal.dataControls.deleteAllChats.description')}
+				>
+					<button
+						class={actionButtonClass}
+						on:click={() => {
+							showDeleteConfirmDialog = true;
+						}}
+						type="button"
+					>
+						{$i18n.t('Delete All')}
+					</button>
+				</UserSettingRow>
 			{/if}
-		</div>
+		</UserSettingSection>
+
+		<UserSettingSection title={$i18n.t('settings.personal.dataControls.sections.files.title')}>
+			<UserSettingRow
+				label={$i18n.t('settings.personal.dataControls.manageFiles.label')}
+				description={$i18n.t('settings.personal.dataControls.manageFiles.description')}
+			>
+				<button
+					class={actionButtonClass}
+					on:click={() => {
+						showFilesModal = true;
+					}}
+					type="button"
+				>
+					{$i18n.t('Manage')}
+				</button>
+			</UserSettingRow>
+		</UserSettingSection>
 	</div>
 </div>

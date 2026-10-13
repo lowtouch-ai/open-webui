@@ -1,63 +1,58 @@
 <script lang="ts">
-	import Fuse from 'fuse.js';
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
-	import { PaneGroup, Pane, PaneResizer } from 'paneforge';
 
-	import { onMount, getContext, onDestroy, tick } from 'svelte';
-	const i18n = getContext('i18n');
+	import { onMount, getContext, onDestroy } from 'svelte';
+	import KnowledgeBrowser from './KnowledgeBase/Browser.svelte';
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
+
+	const i18n = getContext<Writable<i18nType>>('i18n');
 
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import {
-		mobile,
-		showSidebar,
-		knowledge as _knowledge,
-		config,
-		user,
-		settings
-	} from '$lib/stores';
+	import { config, user, settings } from '$lib/stores';
 
-	import {
-		updateFileDataContentById,
-		uploadFile,
-		deleteFileById,
-		getFileById
-	} from '$lib/apis/files';
+	import { uploadFile } from '$lib/apis/files';
 	import {
 		addFileToKnowledgeById,
 		getKnowledgeById,
-		getKnowledgeBases,
-		removeFileFromKnowledgeById,
 		resetKnowledgeById,
-		updateFileFromKnowledgeById,
-		updateKnowledgeById
+		updateKnowledgeById,
+		updateKnowledgeAccessGrants,
+		createKnowledgeDirectory,
+		syncKnowledgeDiff,
+		syncKnowledgeCleanup,
+		testExternalKnowledgeRetrieval
 	} from '$lib/apis/knowledge';
-	import { blobToFile } from '$lib/utils';
+	import { processUrl } from '$lib/apis/retrieval';
+
+	import { blobToFile, copyToClipboard } from '$lib/utils';
+	import { computeFileHash } from '$lib/utils/hash';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
-	import Files from './KnowledgeBase/Files.svelte';
-	import AddFilesPlaceholder from '$lib/components/AddFilesPlaceholder.svelte';
 
-	import AddContentMenu from './KnowledgeBase/AddContentMenu.svelte';
 	import AddTextContentModal from './KnowledgeBase/AddTextContentModal.svelte';
 
 	import SyncConfirmDialog from '../../common/ConfirmDialog.svelte';
-	import RichTextInput from '$lib/components/common/RichTextInput.svelte';
-	import EllipsisVertical from '$lib/components/icons/EllipsisVertical.svelte';
-	import Drawer from '$lib/components/common/Drawer.svelte';
+	import ConfirmDialog from '../../common/ConfirmDialog.svelte';
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
-	import LockClosed from '$lib/components/icons/LockClosed.svelte';
+	import AccessButton from '$lib/components/common/AccessButton.svelte';
 	import AccessControlModal from '../common/AccessControlModal.svelte';
-	import Search from '$lib/components/icons/Search.svelte';
-	import Textarea from '$lib/components/common/Textarea.svelte';
 	import FilesOverlay from '$lib/components/chat/MessageInput/FilesOverlay.svelte';
+	import AttachWebpageModal from '$lib/components/chat/MessageInput/AttachWebpageModal.svelte';
 
-	let largeScreen = true;
+	let showAddWebpageModal = false;
+	let showAddTextContentModal = false;
 
-	let pane;
-	let showSidepanel = true;
-	let minSize = 0;
+	let showSyncConfirmModal = false;
+	let pendingSyncFiles: Array<{ path: string; filename: string; file: File }> | null = null;
+	let syncing: string | null = null;
+	let showAccessControlModal = false;
+	let showResetConfirm = false;
+
+	type DirectoryFileEntry = { path: string; filename: string; file: File };
+	type DirectoryManifestEntry = DirectoryFileEntry & { checksum: string; size: number };
 
 	type Knowledge = {
 		id: string;
@@ -67,56 +62,59 @@
 			file_ids: string[];
 		};
 		files: any[];
+		access_grants?: any[];
+		write_access?: boolean;
+		meta?: any;
 	};
 
 	let id = null;
 	let knowledge: Knowledge | null = null;
-	let query = '';
-
-	let showAddTextContentModal = false;
-	let showSyncConfirmModal = false;
-	let showAccessControlModal = false;
+	let isExternalKnowledge = false;
 
 	let inputFiles = null;
+	let fileItems: any[] = [];
+	let currentDirectoryId: string | null = null;
+	let breadcrumbs: any[] = [];
 
-	let filteredItems = [];
-	$: if (knowledge && knowledge.files) {
-		fuse = new Fuse(knowledge.files, {
-			keys: ['meta.name', 'meta.description']
+	let externalTestQuery = '';
+	let externalTestResult: {
+		documents?: string[];
+		metadatas?: Record<string, any>[];
+		distances?: number[];
+	} | null = null;
+
+	$: isExternalKnowledge = knowledge?.meta?.source === 'external';
+
+	let browser: KnowledgeBrowser;
+	const init = async () => {
+		await browser?.refresh();
+	};
+	const requestUpload = (type: string, parent: string | null, ancestors: any[]) => {
+		currentDirectoryId = parent;
+		breadcrumbs = ancestors;
+		if (type === 'directory') uploadDirectoryHandler();
+		else if (type === 'web') showAddWebpageModal = true;
+		else if (type === 'text') showAddTextContentModal = true;
+		else document.getElementById('files-input')?.click();
+	};
+
+	const externalTestHandler = async () => {
+		if (!isExternalKnowledge || !externalTestQuery.trim()) return;
+
+		const external = knowledge?.meta?.external ?? {};
+		const res = await testExternalKnowledgeRetrieval(localStorage.token, external.connection_id, {
+			query: externalTestQuery,
+			source: external.source,
+			count: 5
+		}).catch((e) => {
+			toast.error(`${e}`);
+			return null;
 		});
-	}
 
-	$: if (fuse) {
-		filteredItems = query
-			? fuse.search(query).map((e) => {
-					return e.item;
-				})
-			: (knowledge?.files ?? []);
-	}
-
-	let selectedFile = null;
-	let selectedFileId = null;
-	let selectedFileContent = '';
-
-	// Add cache object
-	let fileContentCache = new Map();
-
-	$: if (selectedFileId) {
-		const file = (knowledge?.files ?? []).find((file) => file.id === selectedFileId);
-		if (file) {
-			fileSelectHandler(file);
-		} else {
-			selectedFile = null;
+		if (res) {
+			externalTestResult = res;
 		}
-	} else {
-		selectedFile = null;
-	}
-
-	let fuse = null;
-	let debounceTimeout = null;
-	let mediaQuery;
-	let dragged = false;
-	let isSaving = false;
+	};
 
 	const createFileFromText = (name, content) => {
 		const blob = new Blob([content], { type: 'text/plain' });
@@ -126,10 +124,113 @@
 		return file;
 	};
 
+	const uploadWeb = async (urls) => {
+		const targetDirectoryId = currentDirectoryId;
+		if (!knowledge) {
+			toast.error($i18n.t('Knowledge base not found.'));
+			return;
+		}
+
+		if (!Array.isArray(urls)) {
+			urls = [urls];
+		}
+
+		const newFileItems = urls.map((url) => ({
+			type: 'file',
+			file: '',
+			id: null,
+			url: url,
+			name: url,
+			size: null,
+			status: 'uploading',
+			error: '',
+			directory_id: targetDirectoryId,
+			itemId: uuidv4()
+		}));
+
+		// Display all items at once
+		fileItems = [...newFileItems, ...(fileItems ?? [])];
+
+		for (const fileItem of newFileItems) {
+			try {
+				console.log(fileItem);
+				const res = await processUrl(localStorage.token, fileItem.url);
+
+				if (res) {
+					console.log(res);
+					let uploadedFile = res.file;
+
+					if (res.type === 'web' || res.type === 'youtube') {
+						const file = createFileFromText(
+							// Use URL as filename, sanitized
+							fileItem.url
+								.replace(/[^a-z0-9]/gi, '_')
+								.toLowerCase()
+								.slice(0, 50),
+							res.content ?? ''
+						);
+
+						uploadedFile = await uploadFile(localStorage.token, file, {
+							knowledge_id: knowledge.id,
+							directory_id: targetDirectoryId,
+							source_url: fileItem.url
+						});
+					} else if (uploadedFile?.id) {
+						const linkedKnowledge = await addFileToKnowledgeById(
+							localStorage.token,
+							knowledge.id,
+							uploadedFile.id,
+							targetDirectoryId
+						).catch((e) => {
+							toast.error(`${e}`);
+							return null;
+						});
+						if (!linkedKnowledge) {
+							toast.error($i18n.t('Failed to add file.'));
+							uploadedFile = null;
+						}
+					}
+
+					if (uploadedFile) {
+						console.log(uploadedFile);
+						fileItems = fileItems.map((item) => {
+							if (item.itemId === fileItem.itemId) {
+								item.id = uploadedFile.id;
+							}
+							return item;
+						});
+
+						if (uploadedFile.error) {
+							console.warn('File upload warning:', uploadedFile.error);
+							toast.warning(uploadedFile.error);
+							fileItems = fileItems.filter((file) => file.id !== uploadedFile.id);
+						} else {
+							toast.success($i18n.t('File added successfully.'));
+							init();
+						}
+					} else {
+						toast.error($i18n.t('Failed to upload file.'));
+					}
+				} else {
+					// remove the item from fileItems
+					fileItems = fileItems.filter((item) => item.itemId !== fileItem.itemId);
+					toast.error($i18n.t('Failed to process URL: {{url}}', { url: fileItem.url }));
+				}
+			} catch (e) {
+				// remove the item from fileItems
+				fileItems = fileItems.filter((item) => item.itemId !== fileItem.itemId);
+				toast.error(`${e}`);
+			} finally {
+				fileItems = fileItems.filter((item) => item.itemId !== fileItem.itemId);
+				await init();
+			}
+		}
+	};
+
 	const uploadFileHandler = async (file) => {
+		const targetDirectoryId = currentDirectoryId;
 		console.log(file);
 
-		const tempItemId = uuidv4();
 		const fileItem = {
 			type: 'file',
 			file: '',
@@ -139,7 +240,8 @@
 			size: file.size,
 			status: 'uploading',
 			error: '',
-			itemId: tempItemId
+			directory_id: targetDirectoryId,
+			itemId: uuidv4()
 		};
 
 		if (fileItem.size == 0) {
@@ -163,72 +265,57 @@
 			return;
 		}
 
-		knowledge.files = [...(knowledge.files ?? []), fileItem];
-
+		fileItems = [fileItem, ...(fileItems ?? [])];
 		try {
-			// If the file is an audio file, provide the language for STT.
-			let metadata = null;
-			if (
-				(file.type.startsWith('audio/') || file.type.startsWith('video/')) &&
+			let metadata = {
+				knowledge_id: knowledge.id,
+				directory_id: targetDirectoryId,
+				// If the file is an audio file, provide the language for STT.
+				...((file.type.startsWith('audio/') || file.type.startsWith('video/')) &&
 				$settings?.audio?.stt?.language
-			) {
-				metadata = {
-					language: $settings?.audio?.stt?.language
-				};
-			}
+					? {
+							language: $settings?.audio?.stt?.language
+						}
+					: {})
+			};
 
 			const uploadedFile = await uploadFile(localStorage.token, file, metadata).catch((e) => {
 				toast.error(`${e}`);
-				// Remove the failed file from the list
-				knowledge.files = knowledge.files.filter((item) => item.itemId !== tempItemId);
 				return null;
 			});
 
 			if (uploadedFile) {
 				console.log(uploadedFile);
+				fileItems = fileItems.map((item) => {
+					if (item.itemId === fileItem.itemId) {
+						item.id = uploadedFile.id;
+					}
+					return item;
+				});
 
 				if (uploadedFile.error) {
 					console.warn('File upload warning:', uploadedFile.error);
 					toast.warning(uploadedFile.error);
+					fileItems = fileItems.filter((file) => file.id !== uploadedFile.id);
+				} else {
+					toast.success($i18n.t('File added successfully.'));
+					init();
 				}
-
-				knowledge.files = knowledge.files.map((item) => {
-					if (item.itemId === tempItemId) {
-						item.id = uploadedFile.id;
-						item.status = 'processing';
-					}
-
-					// Remove temporary item id
-					delete item.itemId;
-					return item;
-				});
-				await addFileHandler(uploadedFile.id, tempItemId);
 			} else {
 				toast.error($i18n.t('Failed to upload file.'));
-				// Remove the failed file from the list
-				knowledge.files = knowledge.files.filter((item) => item.itemId !== tempItemId);
 			}
 		} catch (e) {
 			toast.error(`${e}`);
-			// Remove the failed file from the list
-			knowledge.files = knowledge.files.filter((item) => item.itemId !== tempItemId);
+		} finally {
+			fileItems = fileItems.filter((item) => item.itemId !== fileItem.itemId);
+			await init();
 		}
 	};
 
 	const uploadDirectoryHandler = async () => {
-		// Check if File System Access API is supported
-		const isFileSystemAccessSupported = 'showDirectoryPicker' in window;
-
-		try {
-			if (isFileSystemAccessSupported) {
-				// Modern browsers (Chrome, Edge) implementation
-				await handleModernBrowserUpload();
-			} else {
-				// Firefox fallback
-				await handleFirefoxUpload();
-			}
-		} catch (error) {
-			handleUploadError(error);
+		const entries = await collectDirectoryFiles();
+		if (entries?.length) {
+			await uploadDirectoryEntries(entries);
 		}
 	};
 
@@ -237,264 +324,297 @@
 		return path.split('/').some((part) => part.startsWith('.'));
 	};
 
-	// Modern browsers implementation using File System Access API
-	const handleModernBrowserUpload = async () => {
-		const dirHandle = await window.showDirectoryPicker();
-		let totalFiles = 0;
-		let uploadedFiles = 0;
-
-		// Function to update the UI with the progress
-		const updateProgress = () => {
-			const percentage = (uploadedFiles / totalFiles) * 100;
-			toast.info(
-				$i18n.t('Upload Progress: {{uploadedFiles}}/{{totalFiles}} ({{percentage}}%)', {
-					uploadedFiles: uploadedFiles,
-					totalFiles: totalFiles,
-					percentage: percentage.toFixed(2)
-				})
-			);
-		};
-
-		// Recursive function to count all files excluding hidden ones
-		async function countFiles(dirHandle) {
-			for await (const entry of dirHandle.values()) {
-				// Skip hidden files and directories
-				if (entry.name.startsWith('.')) continue;
-
-				if (entry.kind === 'file') {
-					totalFiles++;
-				} else if (entry.kind === 'directory') {
-					// Only process non-hidden directories
-					if (!entry.name.startsWith('.')) {
-						await countFiles(entry);
-					}
-				}
-			}
-		}
-
-		// Recursive function to process directories excluding hidden files and folders
-		async function processDirectory(dirHandle, path = '') {
-			for await (const entry of dirHandle.values()) {
-				// Skip hidden files and directories
-				if (entry.name.startsWith('.')) continue;
-
-				const entryPath = path ? `${path}/${entry.name}` : entry.name;
-
-				// Skip if the path contains any hidden folders
-				if (hasHiddenFolder(entryPath)) continue;
-
-				if (entry.kind === 'file') {
-					const file = await entry.getFile();
-					const fileWithPath = new File([file], entryPath, { type: file.type });
-
-					await uploadFileHandler(fileWithPath);
-					uploadedFiles++;
-					updateProgress();
-				} else if (entry.kind === 'directory') {
-					// Only process non-hidden directories
-					if (!entry.name.startsWith('.')) {
-						await processDirectory(entry, entryPath);
-					}
-				}
-			}
-		}
-
-		await countFiles(dirHandle);
-		updateProgress();
-
-		if (totalFiles > 0) {
-			await processDirectory(dirHandle);
-		} else {
-			console.log('No files to upload.');
-		}
-	};
-
-	// Firefox fallback implementation using traditional file input
-	const handleFirefoxUpload = async () => {
-		return new Promise((resolve, reject) => {
-			// Create hidden file input
-			const input = document.createElement('input');
-			input.type = 'file';
-			input.webkitdirectory = true;
-			input.directory = true;
-			input.multiple = true;
-			input.style.display = 'none';
-
-			// Add input to DOM temporarily
-			document.body.appendChild(input);
-
-			input.onchange = async () => {
-				try {
-					const files = Array.from(input.files)
-						// Filter out files from hidden folders
-						.filter((file) => !hasHiddenFolder(file.webkitRelativePath));
-
-					let totalFiles = files.length;
-					let uploadedFiles = 0;
-
-					// Function to update the UI with the progress
-					const updateProgress = () => {
-						const percentage = (uploadedFiles / totalFiles) * 100;
-						toast.info(
-							$i18n.t('Upload Progress: {{uploadedFiles}}/{{totalFiles}} ({{percentage}}%)', {
-								uploadedFiles: uploadedFiles,
-								totalFiles: totalFiles,
-								percentage: percentage.toFixed(2)
-							})
-						);
-					};
-
-					updateProgress();
-
-					// Process all files
-					for (const file of files) {
-						// Skip hidden files (additional check)
-						if (!file.name.startsWith('.')) {
-							const relativePath = file.webkitRelativePath || file.name;
-							const fileWithPath = new File([file], relativePath, { type: file.type });
-
-							await uploadFileHandler(fileWithPath);
-							uploadedFiles++;
-							updateProgress();
-						}
-					}
-
-					// Clean up
-					document.body.removeChild(input);
-					resolve();
-				} catch (error) {
-					reject(error);
-				}
-			};
-
-			input.onerror = (error) => {
-				document.body.removeChild(input);
-				reject(error);
-			};
-
-			// Trigger file picker
-			input.click();
-		});
-	};
-
 	// Error handler
 	const handleUploadError = (error) => {
 		if (error.name === 'AbortError') {
 			toast.info($i18n.t('Directory selection was cancelled'));
 		} else {
-			toast.error($i18n.t('Error accessing directory'));
+			toast.error(`${$i18n.t('Error accessing directory')}: ${error.message}`);
 			console.error('Directory access error:', error);
 		}
 	};
 
-	// Helper function to maintain file paths within zip
-	const syncDirectoryHandler = async () => {
-		if ((knowledge?.files ?? []).length > 0) {
-			const res = await resetKnowledgeById(localStorage.token, id).catch((e) => {
-				toast.error(`${e}`);
+	// Collect files from a directory without uploading.
+	const collectDirectoryFiles = async (): Promise<DirectoryFileEntry[] | null> => {
+		const isFileSystemAccessSupported = 'showDirectoryPicker' in window;
+
+		try {
+			if (isFileSystemAccessSupported) {
+				const dirHandle = await window.showDirectoryPicker();
+				const collected: DirectoryFileEntry[] = [];
+
+				async function traverse(handle: FileSystemDirectoryHandle, dirPath = '') {
+					for await (const entry of handle.values()) {
+						if (entry.name.startsWith('.')) continue;
+						const entryPath = dirPath ? `${dirPath}/${entry.name}` : entry.name;
+						if (hasHiddenFolder(entryPath)) continue;
+
+						if (entry.kind === 'file') {
+							let file: File;
+							try {
+								file = await entry.getFile();
+							} catch (error) {
+								throw new Error(`"${entryPath}": ${error}`);
+							}
+							collected.push({ path: dirPath, filename: entry.name, file });
+						} else if (entry.kind === 'directory') {
+							await traverse(entry, entryPath);
+						}
+					}
+				}
+
+				await traverse(dirHandle, dirHandle.name);
+				return collected;
+			} else {
+				// Firefox fallback
+				return new Promise((resolve, reject) => {
+					const input = document.createElement('input');
+					input.type = 'file';
+					input.webkitdirectory = true;
+					input.directory = true;
+					input.multiple = true;
+					input.style.display = 'none';
+					document.body.appendChild(input);
+
+					input.onchange = () => {
+						try {
+							const files = Array.from(input.files || []).filter(
+								(file) => !hasHiddenFolder(file.webkitRelativePath) && !file.name.startsWith('.')
+							);
+
+							const collected = files.map((file) => {
+								const parts = file.webkitRelativePath.split('/');
+								const filename = parts.pop() || file.name;
+								const path = parts.join('/');
+								return { path, filename, file };
+							});
+
+							document.body.removeChild(input);
+							resolve(collected);
+						} catch (error) {
+							document.body.removeChild(input);
+							reject(error);
+						}
+					};
+
+					input.onerror = (error) => {
+						document.body.removeChild(input);
+						reject(error);
+					};
+
+					input.click();
+				});
+			}
+		} catch (error) {
+			handleUploadError(error);
+			return null;
+		}
+	};
+
+	const buildDirectoryManifest = async (
+		entries: DirectoryFileEntry[]
+	): Promise<DirectoryManifestEntry[]> => {
+		return Promise.all(
+			entries.map(async (entry) => ({
+				...entry,
+				checksum: await computeFileHash(entry.file),
+				size: entry.file.size
+			}))
+		);
+	};
+
+	const createMissingDirectories = async (diff: any) => {
+		if (!knowledge) return {};
+
+		const directoryIdByPath: Record<string, string> = { ...(diff.directory_map || {}) };
+
+		for (const dirPath of diff.mkdir) {
+			const segments = dirPath.split('/');
+			const name = segments.at(-1)!;
+			const parentPath = segments.slice(0, -1).join('/');
+			const parentId = parentPath ? directoryIdByPath[parentPath] : null;
+
+			const directory = await createKnowledgeDirectory(
+				localStorage.token,
+				knowledge.id,
+				name,
+				parentId
+			);
+			if (directory) {
+				directoryIdByPath[dirPath] = directory.id;
+			}
+		}
+
+		return directoryIdByPath;
+	};
+
+	const uploadManifestEntries = async (
+		entries: DirectoryManifestEntry[],
+		resolveDirectoryId: (entry: DirectoryManifestEntry) => string | null | undefined
+	) => {
+		let failedCount = 0;
+
+		for (const [index, entry] of entries.entries()) {
+			const displayPath = entry.path ? `${entry.path}/${entry.filename}` : entry.filename;
+			syncing = $i18n.t('Uploading {{current}}/{{total}}: {{file}}', {
+				current: index + 1,
+				total: entries.length,
+				file: displayPath
 			});
 
-			if (res) {
-				knowledge = res;
-				toast.success($i18n.t('Knowledge reset successfully.'));
+			const fileObject = new File([entry.file], entry.filename, { type: entry.file.type });
+			const uploadedFile = await uploadFile(localStorage.token, fileObject, {
+				knowledge_id: knowledge.id,
+				file_hash: entry.checksum,
+				directory_id: resolveDirectoryId(entry)
+			}).catch((error) => ({ error }));
 
-				// Upload directory
-				uploadDirectoryHandler();
+			if (!uploadedFile || uploadedFile.error) {
+				const error = uploadedFile?.error;
+				const reason =
+					typeof error === 'string'
+						? error
+						: (error?.detail ?? error?.message ?? $i18n.t('Failed to upload file.'));
+
+				failedCount++;
+				console.error('Upload failed:', displayPath, reason);
 			}
-		} else {
-			uploadDirectoryHandler();
 		}
-	};
 
-	const addFileHandler = async (fileId, tempItemId = null) => {
-		const updatedKnowledge = await addFileToKnowledgeById(localStorage.token, id, fileId).catch(
-			(e) => {
-				toast.error(`${e}`);
-				return null;
-			}
-		);
-
-		if (updatedKnowledge) {
-			// Preserve files that are currently uploading or processing
-			const uploadingFiles = knowledge.files.filter(
-				(file) => file.status === 'uploading' || (file.itemId && file.itemId !== tempItemId)
+		if (failedCount > 0) {
+			toast.error(
+				$i18n.t('Upload failed for {{failed}} of {{total}} files.', {
+					failed: failedCount,
+					total: entries.length
+				})
 			);
-			
-			// Merge server state with local uploading state
-			const serverFiles = updatedKnowledge.files || [];
-			knowledge = {
-				...updatedKnowledge,
-				files: [...serverFiles, ...uploadingFiles]
-			};
-			
-			toast.success($i18n.t('File added successfully.'));
-		} else {
-			toast.error($i18n.t('Failed to add file.'));
-			knowledge.files = knowledge.files.filter((file) => file.id !== fileId);
 		}
+
+		return failedCount;
 	};
 
-	const deleteFileHandler = async (fileId) => {
+	const uploadDirectoryEntries = async (entries: DirectoryFileEntry[]) => {
+		if (!knowledge) return;
+		const targetDirectoryId = currentDirectoryId;
+		const targetPath = breadcrumbs.map((crumb) => crumb.name).join('/');
+		const getDirectoryUploadPath = (path: string) =>
+			targetPath && path ? `${targetPath}/${path}` : targetPath || path;
+
 		try {
-			console.log('Starting file deletion process for:', fileId);
+			syncing = $i18n.t('Computing checksums ({{count}} files)', { count: entries.length });
+			const manifest = await buildDirectoryManifest(entries);
 
-			// Remove from knowledge base only
-			const updatedKnowledge = await removeFileFromKnowledgeById(localStorage.token, id, fileId);
-
-			console.log('Knowledge base updated:', updatedKnowledge);
-
-			if (updatedKnowledge) {
-				// Preserve files that are currently uploading
-				const uploadingFiles = knowledge.files.filter(
-					(file) => file.status === 'uploading' || file.itemId
-				);
-				
-				// Merge server state with local uploading state
-				const serverFiles = updatedKnowledge.files || [];
-				knowledge = {
-					...updatedKnowledge,
-					files: [...serverFiles, ...uploadingFiles]
-				};
-				
-				toast.success($i18n.t('File removed successfully.'));
-			}
-		} catch (e) {
-			console.error('Error in deleteFileHandler:', e);
-			toast.error(`${e}`);
-		}
-	};
-
-	const updateFileContentHandler = async () => {
-		if (isSaving) {
-			console.log('Save operation already in progress, skipping...');
-			return;
-		}
-		isSaving = true;
-		try {
-			const fileId = selectedFile.id;
-			const content = selectedFileContent;
-			// Clear the cache for this file since we're updating it
-			fileContentCache.delete(fileId);
-			const res = await updateFileDataContentById(localStorage.token, fileId, content).catch(
-				(e) => {
-					toast.error(`${e}`);
-				}
-			);
-			const updatedKnowledge = await updateFileFromKnowledgeById(
+			syncing = $i18n.t('Comparing with knowledge base...');
+			const diff = await syncKnowledgeDiff(
 				localStorage.token,
 				id,
-				fileId
-			).catch((e) => {
-				toast.error(`${e}`);
-			});
-			if (res && updatedKnowledge) {
-				knowledge = updatedKnowledge;
-				toast.success($i18n.t('File content updated successfully.'));
+				manifest.map(({ filename, path, checksum, size }) => ({
+					filename,
+					path: getDirectoryUploadPath(path),
+					checksum,
+					size
+				}))
+			);
+
+			if (!diff) {
+				toast.error($i18n.t('Failed to compare files.'));
+				return;
 			}
+
+			const directoryIdByPath = await createMissingDirectories(diff);
+
+			const failedCount = await uploadManifestEntries(manifest, (entry) =>
+				entry.path ? directoryIdByPath[getDirectoryUploadPath(entry.path)] : targetDirectoryId
+			);
+
+			if (failedCount === 0) {
+				toast.success($i18n.t('File uploaded successfully'));
+			}
+
+			init();
+		} catch (e) {
+			toast.error(`${e}`);
 		} finally {
-			isSaving = false;
+			syncing = null;
 		}
 	};
+
+	// Incremental sync: hash locally → diff on server → upload only what changed
+	const syncDirectoryHandler = async () => {
+		if (!pendingSyncFiles?.length) return;
+
+		try {
+			// ── 2. Compute checksums ──
+			syncing = $i18n.t('Computing checksums ({{count}} files)', {
+				count: pendingSyncFiles.length
+			});
+			const manifest = await buildDirectoryManifest(pendingSyncFiles);
+			pendingSyncFiles = null;
+
+			// ── 3. Diff against knowledge base ──
+			syncing = $i18n.t('Comparing with knowledge base...');
+			const diff = await syncKnowledgeDiff(
+				localStorage.token,
+				id,
+				manifest.map(({ filename, path, checksum, size }) => ({ filename, path, checksum, size }))
+			);
+
+			if (!diff) {
+				toast.error($i18n.t('Failed to compare files.'));
+				return;
+			}
+
+			// ── 4. Cleanup — remove deleted + stale modified files first ──
+			const staleFileIds = [
+				...diff.deleted.map((d: any) => d.file_id),
+				...diff.modified.map((m: any) => m.stale_file_id)
+			];
+
+			if (staleFileIds.length > 0 || diff.rmdir.length > 0) {
+				syncing = $i18n.t('Removing {{count}} stale files...', { count: staleFileIds.length });
+				await syncKnowledgeCleanup(localStorage.token, id, staleFileIds, diff.rmdir);
+				browser?.clearRemovedSelection(staleFileIds);
+			}
+
+			// ── 5. mkdir — create missing directories (parents first) ──
+			const directoryIdByPath = await createMissingDirectories(diff);
+
+			// ── 6. Upload added + modified files ──
+			const filesToUpload = manifest.filter(
+				(entry) =>
+					diff.added.some((a: any) => a.filename === entry.filename && a.path === entry.path) ||
+					diff.modified.some((m: any) => m.filename === entry.filename && m.path === entry.path)
+			);
+
+			const failedCount = await uploadManifestEntries(filesToUpload, (entry) =>
+				entry.path ? directoryIdByPath[entry.path] : null
+			);
+
+			// ── 7. Report ──
+			if (failedCount === 0) {
+				toast.success(
+					$i18n.t(
+						'Sync complete: {{added}} added, {{modified}} modified, {{deleted}} deleted, {{unmodified}} unmodified',
+						{
+							added: diff.added.length,
+							modified: diff.modified.length,
+							deleted: diff.deleted.length,
+							unmodified: diff.unmodified_count
+						}
+					)
+				);
+			}
+			init();
+		} catch (e) {
+			toast.error(`${e}`);
+		} finally {
+			syncing = null;
+		}
+	};
+
+	let debounceTimeout = null;
+
+	let dragged = false;
 
 	const changeDebounceHandler = () => {
 		console.log('debounce');
@@ -512,47 +632,67 @@
 				...knowledge,
 				name: knowledge.name,
 				description: knowledge.description,
-				access_control: knowledge.access_control
+				access_grants: knowledge.access_grants ?? []
 			}).catch((e) => {
 				toast.error(`${e}`);
 			});
 
 			if (res) {
 				toast.success($i18n.t('Knowledge updated successfully'));
-				_knowledge.set(await getKnowledgeBases(localStorage.token));
 			}
 		}, 1000);
 	};
 
-	const handleMediaQuery = async (e) => {
-		if (e.matches) {
-			largeScreen = true;
-		} else {
-			largeScreen = false;
+	const readDirectoryEntries = async (reader: any) => {
+		const entries: any[] = [];
+
+		while (true) {
+			const batch = await new Promise<any[]>((resolve, reject) => {
+				reader.readEntries(resolve, reject);
+			});
+
+			if (batch.length === 0) {
+				break;
+			}
+
+			entries.push(...batch);
 		}
+
+		return entries;
 	};
 
-	const fileSelectHandler = async (file) => {
-		try {
-			selectedFile = file;
-
-			// Check cache first
-			if (fileContentCache.has(file.id)) {
-				selectedFileContent = fileContentCache.get(file.id);
-				return;
-			}
-
-			const response = await getFileById(localStorage.token, file.id);
-			if (response) {
-				selectedFileContent = response.data.content;
-				// Cache the content
-				fileContentCache.set(file.id, response.data.content);
-			} else {
-				toast.error($i18n.t('No content found in file.'));
-			}
-		} catch (e) {
-			toast.error($i18n.t('Failed to load file content.'));
+	const collectDroppedEntryFiles = async (
+		entry: any,
+		entryPath = entry.name
+	): Promise<DirectoryFileEntry[]> => {
+		if (entry.name.startsWith('.') || hasHiddenFolder(entryPath)) {
+			return [];
 		}
+
+		if (entry.isFile) {
+			let file: File;
+			try {
+				file = await new Promise<File>((resolve, reject) => {
+					entry.file(resolve, reject);
+				});
+			} catch (error) {
+				throw new Error(`"${entryPath}": ${error}`);
+			}
+			const parts = entryPath.split('/');
+			const filename = parts.pop() || file.name;
+			return [{ path: parts.join('/'), filename, file }];
+		}
+
+		if (entry.isDirectory) {
+			const reader = entry.createReader();
+			const entries = await readDirectoryEntries(reader);
+			const nested = await Promise.all(
+				entries.map((child) => collectDroppedEntryFiles(child, `${entryPath}/${child.name}`))
+			);
+			return nested.flat();
+		}
+
+		return [];
 	};
 
 	const onDragOver = (e) => {
@@ -574,13 +714,46 @@
 		e.preventDefault();
 		dragged = false;
 
-		if (e.dataTransfer?.types?.includes('Files')) {
-			if (e.dataTransfer?.files) {
-				const inputFiles = e.dataTransfer?.files;
+		if (isExternalKnowledge || !knowledge?.write_access) {
+			toast.error($i18n.t('You do not have permission to upload files to this knowledge base.'));
+			return;
+		}
 
-				if (inputFiles && inputFiles.length > 0) {
-					for (const file of inputFiles) {
+		if (e.dataTransfer?.types?.includes('Files')) {
+			currentDirectoryId = null;
+			breadcrumbs = [];
+			if (e.dataTransfer?.files) {
+				const inputItems = e.dataTransfer?.items;
+
+				if (inputItems && inputItems.length > 0) {
+					const directoryEntries: DirectoryFileEntry[] = [];
+					const looseFiles: File[] = [];
+
+					for (const rawItem of Array.from(inputItems)) {
+						const item = rawItem as DataTransferItem & { webkitGetAsEntry?: () => any };
+						const entry = item.webkitGetAsEntry?.();
+
+						if (entry?.isDirectory) {
+							try {
+								directoryEntries.push(...(await collectDroppedEntryFiles(entry)));
+							} catch (error) {
+								handleUploadError(error);
+								return;
+							}
+						} else {
+							const file = item.getAsFile();
+							if (file) {
+								looseFiles.push(file);
+							}
+						}
+					}
+
+					for (const file of looseFiles) {
 						await uploadFileHandler(file);
+					}
+
+					if (directoryEntries.length > 0) {
+						await uploadDirectoryEntries(directoryEntries);
 					}
 				} else {
 					toast.error($i18n.t(`File not found.`));
@@ -590,44 +763,7 @@
 	};
 
 	onMount(async () => {
-		// listen to resize 1024px
-		mediaQuery = window.matchMedia('(min-width: 1024px)');
-
-		mediaQuery.addEventListener('change', handleMediaQuery);
-		handleMediaQuery(mediaQuery);
-
-		// Select the container element you want to observe
-		const container = document.getElementById('collection-container');
-
-		// initialize the minSize based on the container width
-		minSize = !largeScreen ? 100 : Math.floor((300 / container.clientWidth) * 100);
-
-		// Create a new ResizeObserver instance
-		const resizeObserver = new ResizeObserver((entries) => {
-			for (let entry of entries) {
-				const width = entry.contentRect.width;
-				// calculate the percentage of 300
-				const percentage = (300 / width) * 100;
-				// set the minSize to the percentage, must be an integer
-				minSize = !largeScreen ? 100 : Math.floor(percentage);
-
-				if (showSidepanel) {
-					if (pane && pane.isExpanded() && pane.getSize() < minSize) {
-						pane.resize(minSize);
-					}
-				}
-			}
-		});
-
-		// Start observing the container's size changes
-		resizeObserver.observe(container);
-
-		if (pane) {
-			pane.expand();
-		}
-
 		id = $page.params.id;
-
 		const res = await getKnowledgeById(localStorage.token, id).catch((e) => {
 			toast.error(`${e}`);
 			return null;
@@ -635,6 +771,9 @@
 
 		if (res) {
 			knowledge = res;
+			if (!Array.isArray(knowledge?.access_grants)) {
+				knowledge.access_grants = [];
+			}
 		} else {
 			goto('/workspace/knowledge');
 		}
@@ -646,30 +785,33 @@
 	});
 
 	onDestroy(() => {
-		mediaQuery?.removeEventListener('change', handleMediaQuery);
+		clearTimeout(debounceTimeout);
 		const dropZone = document.querySelector('body');
 		dropZone?.removeEventListener('dragover', onDragOver);
 		dropZone?.removeEventListener('drop', onDrop);
 		dropZone?.removeEventListener('dragleave', onDragLeave);
 	});
-
-	const decodeString = (str: string) => {
-		try {
-			return decodeURIComponent(str);
-		} catch (e) {
-			return str;
-		}
-	};
 </script>
 
 <FilesOverlay show={dragged} />
 <SyncConfirmDialog
 	bind:show={showSyncConfirmModal}
 	message={$i18n.t(
-		'This will reset the knowledge base and sync all files. Do you wish to continue?'
+		'{{count}} files selected. Only new and modified files will be uploaded. Deleted files will be removed. The folder structure will be mirrored. Continue?',
+		{ count: pendingSyncFiles?.length ?? 0 }
 	)}
 	on:confirm={() => {
 		syncDirectoryHandler();
+	}}
+	on:cancel={() => {
+		pendingSyncFiles = null;
+	}}
+/>
+
+<AttachWebpageModal
+	bind:show={showAddWebpageModal}
+	onSubmit={async (e) => {
+		uploadWeb(e.data);
 	}}
 />
 
@@ -705,265 +847,174 @@
 	}}
 />
 
-<div class="flex flex-col w-full h-full translate-y-1" id="collection-container">
+<div class="flex h-full min-h-0 w-full flex-col overflow-hidden" id="collection-container">
 	{#if id && knowledge}
 		<AccessControlModal
 			bind:show={showAccessControlModal}
-			bind:accessControl={knowledge.access_control}
-			allowPublic={$user?.permissions?.sharing?.public_knowledge || $user?.role === 'admin'}
-			onChange={() => {
-				changeDebounceHandler();
+			bind:accessGrants={knowledge.access_grants}
+			share={$user?.permissions?.sharing?.knowledge || $user?.role === 'admin'}
+			sharePublic={$user?.permissions?.sharing?.public_knowledge || $user?.role === 'admin'}
+			shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) ||
+				$user?.role === 'admin'}
+			allowGroups={($user?.permissions?.access_grants?.allow_groups ?? true) ||
+				$user?.role === 'admin'}
+			onChange={async () => {
+				try {
+					await updateKnowledgeAccessGrants(localStorage.token, id, knowledge.access_grants ?? []);
+					toast.success($i18n.t('Saved'));
+				} catch (error) {
+					toast.error(`${error}`);
+				}
 			}}
 			accessRoles={['read', 'write']}
 		/>
-		<div class="w-full mb-2.5">
-			<div class=" flex w-full">
-				<div class="flex-1">
-					<div class="flex items-center justify-between w-full px-0.5 mb-1">
-						<div class="w-full">
-							<input
-								type="text"
-								class="text-left w-full font-semibold text-2xl font-primary bg-transparent outline-hidden"
-								bind:value={knowledge.name}
-								placeholder={$i18n.t('Knowledge Name')}
-								on:input={() => {
-									changeDebounceHandler();
-								}}
-							/>
-						</div>
-
-						<div class="self-center shrink-0">
-							<button
-								class="bg-gray-50 hover:bg-gray-100 text-black dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition px-2 py-1 rounded-full flex gap-1 items-center"
-								type="button"
-								on:click={() => {
-									showAccessControlModal = true;
-								}}
-							>
-								<LockClosed strokeWidth="2.5" className="size-3.5" />
-
-								<div class="text-sm font-medium shrink-0">
-									{$i18n.t('Access')}
-								</div>
-							</button>
-						</div>
-					</div>
-
-					<div class="flex w-full px-1">
-						<input
-							type="text"
-							class="text-left text-xs w-full text-gray-500 bg-transparent outline-hidden"
-							bind:value={knowledge.description}
-							placeholder={$i18n.t('Knowledge Description')}
-							on:input={() => {
-								changeDebounceHandler();
-							}}
-						/>
-					</div>
-				</div>
+		<div class="flex min-h-7 shrink-0 items-center justify-between gap-2 pr-0.5">
+			<button
+				type="button"
+				class="flex h-6 w-fit shrink-0 items-center gap-1 whitespace-nowrap rounded-md text-xs text-gray-400 hover:text-gray-700 dark:text-gray-600 dark:hover:text-gray-300"
+				on:click={() => goto('/workspace/knowledge')}
+				><ChevronLeft className="size-3" strokeWidth="2" />{$i18n.t('Back')}</button
+			>
+			<!-- Previous file count label: {$i18n.t('{{COUNT}} files')} -->
+			{#if knowledge.write_access}<AccessButton
+					on:click={() => (showAccessControlModal = true)}
+				/>{:else}<span class="text-xs text-gray-500">{$i18n.t('Read Only')}</span>{/if}
+		</div>
+		<div class="shrink-0 px-1 pb-2.5">
+			<input
+				class="w-full bg-transparent text-sm outline-hidden"
+				bind:value={knowledge.name}
+				aria-label={$i18n.t('Knowledge Name')}
+				placeholder={$i18n.t('Knowledge Name')}
+				disabled={!knowledge.write_access}
+				on:input={changeDebounceHandler}
+			/>
+			<div class="mt-0.5 flex min-w-0 items-center gap-2 text-xs text-gray-500">
+				<input
+					class="min-w-0 flex-1 bg-transparent outline-hidden"
+					bind:value={knowledge.description}
+					aria-label={$i18n.t('Knowledge Description')}
+					placeholder={$i18n.t('Knowledge Description')}
+					disabled={!knowledge.write_access}
+					on:input={changeDebounceHandler}
+				/>
+				<button
+					type="button"
+					title={$i18n.t('Click to copy ID')}
+					class="max-w-[40%] shrink-0 truncate font-mono"
+					on:click={() => {
+						copyToClipboard(id);
+						toast.success($i18n.t('ID copied to clipboard'));
+					}}>{id}</button
+				>
 			</div>
 		</div>
-
-		<div class="flex flex-row flex-1 h-full max-h-full pb-2.5 gap-3">
-			{#if largeScreen}
-				<div class="flex-1 flex justify-start w-full h-full max-h-full">
-					{#if selectedFile}
-						<div class=" flex flex-col w-full">
-							<div class="shrink-0 mb-2 flex items-center">
-								{#if !showSidepanel}
-									<div class="-translate-x-2">
-										<button
-											class="w-full text-left text-sm p-1.5 rounded-lg dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-gray-850"
-											on:click={() => {
-												pane.expand();
-											}}
-										>
-											<ChevronLeft strokeWidth="2.5" />
-										</button>
-									</div>
-								{/if}
-
-								<div class=" flex-1 text-xl font-medium">
-									<a
-										class="hover:text-gray-500 dark:hover:text-gray-100 hover:underline grow line-clamp-1"
-										href={selectedFile.id ? `/api/v1/files/${selectedFile.id}/content` : '#'}
-										target="_blank"
-									>
-										{decodeString(selectedFile?.meta?.name)}
-									</a>
-								</div>
-
-								<div>
-									<button
-										class="self-center w-fit text-sm py-1 px-2.5 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
-										disabled={isSaving}
-										on:click={() => {
-											updateFileContentHandler();
-										}}
-									>
-										{$i18n.t('Save')}
-										{#if isSaving}
-											<div class="ml-2 self-center">
-												<Spinner />
-											</div>
-										{/if}
-									</button>
-								</div>
-							</div>
-
-							<div
-								class=" flex-1 w-full h-full max-h-full text-sm bg-transparent outline-hidden overflow-y-auto scrollbar-hidden"
-							>
-								{#key selectedFile.id}
-									<textarea
-										class="w-full h-full outline-none resize-none"
-										bind:value={selectedFileContent}
-										placeholder={$i18n.t('Add content here')}
-									/>
-								{/key}
-							</div>
-						</div>
-					{:else}
-						<div class="h-full flex w-full">
-							<div class="m-auto text-xs text-center text-gray-200 dark:text-gray-700">
-								{$i18n.t('Drag and drop a file to upload or select a file to view')}
-							</div>
-						</div>
-					{/if}
-				</div>
-			{:else if !largeScreen && selectedFileId !== null}
-				<Drawer
-					className="h-full"
-					show={selectedFileId !== null}
-					onClose={() => {
-						selectedFileId = null;
-					}}
+		<div class="mb-2 min-h-0 flex-1">
+			{#if isExternalKnowledge}<div
+					class="h-full overflow-auto rounded-2xl border border-gray-100/80 dark:border-white/[0.04]"
 				>
-					<div class="flex flex-col justify-start h-full max-h-full p-2">
-						<div class=" flex flex-col w-full h-full max-h-full">
-							<div class="shrink-0 mt-1 mb-2 flex items-center">
-								<div class="mr-2">
-									<button
-										class="w-full text-left text-sm p-1.5 rounded-lg dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-gray-850"
-										on:click={() => {
-											selectedFileId = null;
-										}}
-									>
-										<ChevronLeft strokeWidth="2.5" />
-									</button>
-								</div>
-								<div class=" flex-1 text-xl line-clamp-1">
-									{selectedFile?.meta?.name}
-								</div>
-
-								<div>
-									<button
-										class="self-center w-fit text-sm py-1 px-2.5 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
-										disabled={isSaving}
-										on:click={() => {
-											updateFileContentHandler();
-										}}
-									>
-										{$i18n.t('Save')}
-										{#if isSaving}
-											<div class="ml-2 self-center">
-												<Spinner />
-											</div>
-										{/if}
-									</button>
-								</div>
+					<div class="p-5 flex flex-col gap-4">
+						<div class="flex flex-wrap gap-2 text-xs">
+							<div class="px-2 py-1 rounded-lg bg-gray-50 dark:bg-gray-850">
+								{$i18n.t('Connected')}
 							</div>
-
-							<div
-								class=" flex-1 w-full h-full max-h-full py-2.5 px-3.5 rounded-lg text-sm bg-transparent overflow-y-auto scrollbar-hidden"
-							>
-								{#key selectedFile.id}
-									<textarea
-										class="w-full h-full outline-none resize-none"
-										bind:value={selectedFileContent}
-										placeholder={$i18n.t('Add content here')}
-									/>
-								{/key}
+							<div class="px-2 py-1 rounded-lg bg-gray-50 dark:bg-gray-850">
+								{$i18n.t('Read Only')}
+							</div>
+							<div class="px-2 py-1 rounded-lg bg-gray-50 dark:bg-gray-850">
+								{knowledge?.meta?.external?.provider ?? $i18n.t('Provider')}
+							</div>
+							<div class="px-2 py-1 rounded-lg bg-gray-50 dark:bg-gray-850">
+								{$i18n.t('Service Account')}
 							</div>
 						</div>
-					</div>
-				</Drawer>
-			{/if}
 
-			<div
-				class="{largeScreen ? 'shrink-0 w-72 max-w-72' : 'flex-1'}
-			flex
-			py-2
-			rounded-2xl
-			border
-			border-gray-50
-			h-full
-			dark:border-gray-850"
-			>
-				<div class=" flex flex-col w-full space-x-2 rounded-lg h-full">
-					<div class="w-full h-full flex flex-col">
-						<div class=" px-3">
-							<div class="flex mb-0.5">
-								<div class=" self-center ml-1 mr-3">
-									<Search />
+						<div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+							<div>
+								<div class="text-xs text-gray-500 mb-1">{$i18n.t('Mapped Source')}</div>
+								<div class="rounded-xl bg-gray-50 dark:bg-gray-850 px-3 py-2">
+									{knowledge?.meta?.external?.source?.name ?? $i18n.t('Not configured')}
 								</div>
+							</div>
+							<div>
+								<div class="text-xs text-gray-500 mb-1">{$i18n.t('Auth Mode')}</div>
+								<div class="rounded-xl bg-gray-50 dark:bg-gray-850 px-3 py-2">
+									{$i18n.t('Admin-managed service account')}
+								</div>
+							</div>
+						</div>
+
+						<div class="text-xs text-gray-500">
+							<!-- LICENSE covers this Open WebUI wordmark.
+						Do not alter, remove, obscure, or replace it except as LICENSE permits:
+						https://docs.openwebui.com/license. -->
+							{$i18n.t(
+								'This knowledge base retrieves from a connected source. Open WebUI can query it, but cannot upload, sync, edit, delete, reset, or reindex its source data.'
+							)}
+						</div>
+
+						<div class="flex flex-col gap-2">
+							<div class="text-xs">{$i18n.t('Test Query')}</div>
+							<div class="flex gap-2">
 								<input
-									class=" w-full text-sm pr-4 py-1 rounded-r-xl outline-hidden bg-transparent"
-									bind:value={query}
-									placeholder={`${$i18n.t('Search Collection')}${(knowledge?.files ?? []).length ? ` (${(knowledge?.files ?? []).length})` : ''}`}
-									on:focus={() => {
-										selectedFileId = null;
-									}}
+									class="w-full text-xs rounded-xl bg-gray-50 dark:bg-gray-850 px-3 py-2 outline-hidden"
+									bind:value={externalTestQuery}
+									placeholder={$i18n.t('Ask this knowledge source a test question')}
 								/>
-
-								<div>
-									<AddContentMenu
-										on:upload={(e) => {
-											if (e.detail.type === 'directory') {
-												uploadDirectoryHandler();
-											} else if (e.detail.type === 'text') {
-												showAddTextContentModal = true;
-											} else {
-												document.getElementById('files-input').click();
-											}
-										}}
-										on:sync={(e) => {
-											showSyncConfirmModal = true;
-										}}
-									/>
-								</div>
+								<button
+									class="px-3 py-2 rounded-xl bg-black text-white dark:bg-white dark:text-black text-xs"
+									on:click={externalTestHandler}
+								>
+									{$i18n.t('Test')}
+								</button>
 							</div>
 						</div>
 
-						{#if filteredItems.length > 0}
-							<div class=" flex overflow-y-auto h-full w-full scrollbar-hidden text-xs">
-								<Files
-									small
-									files={filteredItems}
-									{selectedFileId}
-									on:click={(e) => {
-										selectedFileId = selectedFileId === e.detail ? null : e.detail;
-									}}
-									on:delete={(e) => {
-										console.log(e.detail);
-
-										selectedFileId = null;
-										deleteFileHandler(e.detail);
-									}}
-								/>
-							</div>
-						{:else}
-							<div class="my-3 flex flex-col justify-center text-center text-gray-500 text-xs">
-								<div>
-									{$i18n.t('No content found')}
-								</div>
+						{#if externalTestResult}
+							<div class="rounded-xl bg-gray-50 dark:bg-gray-850 p-3 text-xs">
+								<div class="mb-2">{$i18n.t('Preview')}</div>
+								{#each externalTestResult.documents ?? [] as document, idx}
+									<div class="border-t border-gray-100 dark:border-gray-800 py-2">
+										<div class="line-clamp-4">{document}</div>
+										<div class="text-gray-500 mt-1">
+											{externalTestResult.metadatas?.[idx]?.source ?? ''}
+										</div>
+									</div>
+								{/each}
 							</div>
 						{/if}
 					</div>
-				</div>
-			</div>
+				</div>{:else}
+				<KnowledgeBrowser
+					bind:this={browser}
+					{knowledge}
+					transfers={fileItems}
+					{syncing}
+					onUpload={requestUpload}
+					onSync={async () => {
+						pendingSyncFiles = await collectDirectoryFiles();
+						if (pendingSyncFiles?.length) showSyncConfirmModal = true;
+					}}
+					onReset={() => (showResetConfirm = true)}
+				/>
+			{/if}
 		</div>
-	{:else}
-		<Spinner className="size-5" />
-	{/if}
+	{:else}<Spinner className="size-5" />{/if}
 </div>
+
+<ConfirmDialog
+	bind:show={showResetConfirm}
+	title={$i18n.t('Reset knowledge base?')}
+	on:confirm={async () => {
+		await resetKnowledgeById(localStorage.token, id);
+		browser?.clearRemovedSelection();
+		toast.success($i18n.t('Knowledge base has been reset'));
+		init();
+	}}
+>
+	<div class="text-sm text-gray-700 dark:text-gray-300 flex-1 line-clamp-3">
+		{$i18n.t(
+			'This will remove all files and directories from this knowledge base. This action cannot be undone.'
+		)}
+	</div>
+</ConfirmDialog>

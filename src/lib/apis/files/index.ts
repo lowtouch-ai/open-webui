@@ -1,16 +1,27 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import { splitStream } from '$lib/utils';
 
-export const uploadFile = async (token: string, file: File, metadata?: object | null) => {
+export const uploadFile = async (
+	token: string,
+	file: File,
+	metadata?: object | null,
+	process?: boolean | null,
+	stream: boolean = true
+) => {
 	const data = new FormData();
 	data.append('file', file);
 	if (metadata) {
 		data.append('metadata', JSON.stringify(metadata));
 	}
 
+	const searchParams = new URLSearchParams();
+	if (process !== undefined && process !== null) {
+		searchParams.append('process', String(process));
+	}
+
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/files/`, {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/files/?${searchParams.toString()}`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -32,7 +43,7 @@ export const uploadFile = async (token: string, file: File, metadata?: object | 
 		throw error;
 	}
 
-	if (res) {
+	if (res && stream) {
 		const status = await getFileProcessStatus(token, res.id);
 
 		if (status && status.ok) {
@@ -62,6 +73,10 @@ export const uploadFile = async (token: string, file: File, metadata?: object | 
 								if (data?.error) {
 									console.error(data.error);
 									res.error = data.error;
+								}
+
+								if (res?.data) {
+									res.data = data;
 								}
 							}
 						}
@@ -130,10 +145,13 @@ export const uploadDir = async (token: string) => {
 	return res;
 };
 
-export const getFiles = async (token: string = '') => {
+export const getFiles = async (token: string = '', content: boolean = false) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/files/`, {
+	const searchParams = new URLSearchParams();
+	searchParams.append('content', String(content));
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/files/?${searchParams.toString()}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -150,6 +168,74 @@ export const getFiles = async (token: string = '') => {
 		})
 		.catch((err) => {
 			error = err.detail;
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const searchFiles = async (
+	token: string,
+	filename: string = '*',
+	skip: number = 0,
+	limit: number = 50,
+	content: boolean = false
+) => {
+	let error = null;
+
+	const searchParams = new URLSearchParams();
+	searchParams.append('filename', filename);
+	searchParams.append('skip', String(skip));
+	searchParams.append('limit', String(limit));
+	searchParams.append('content', String(content));
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/files/search?${searchParams.toString()}`, {
+		method: 'GET',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+			console.error(err);
+			return [];
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const getFileCount = async (token: string = '') => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/files/count`, {
+		method: 'GET',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err;
 			console.error(err);
 			return null;
 		});
@@ -238,12 +324,41 @@ export const getFileContentById = async (id: string) => {
 	})
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();
-			return await res.blob();
+			return await res.arrayBuffer();
 		})
 		.catch((err) => {
 			error = err.detail;
 			console.error(err);
 
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const renameFileById = async (token: string, id: string, filename: string) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/files/${id}/rename`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify({ filename })
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+			console.error(err);
 			return null;
 		});
 
@@ -314,4 +429,59 @@ export const deleteAllFiles = async (token: string) => {
 	}
 
 	return res;
+};
+
+export class FileContentError extends Error {
+	constructor(
+		message: string,
+		public status: number
+	) {
+		super(message);
+	}
+}
+
+export const getFileBlobById = async (
+	token: string,
+	id: string,
+	{
+		signal,
+		attachment = false,
+		filename
+	}: { signal?: AbortSignal; attachment?: boolean; filename?: string } = {}
+): Promise<Blob> => {
+	const suffix = filename ? `/${encodeURIComponent(filename)}` : `?attachment=${attachment}`;
+	const response = await fetch(
+		`${WEBUI_API_BASE_URL}/files/${encodeURIComponent(id)}/content${suffix}`,
+		{
+			headers: { authorization: `Bearer ${token}` },
+			signal
+		}
+	);
+	if (!response.ok) {
+		const error = await response.json().catch(() => null);
+		throw new FileContentError(
+			error?.detail || `Unable to load file (${response.status})`,
+			response.status
+		);
+	}
+	return response.blob();
+};
+
+export const getFileIndexedText = async (
+	token: string,
+	id: string,
+	signal?: AbortSignal
+): Promise<string> => {
+	const response = await fetch(
+		`${WEBUI_API_BASE_URL}/files/${encodeURIComponent(id)}/data/content`,
+		{
+			headers: { authorization: `Bearer ${token}` },
+			signal
+		}
+	);
+	if (!response.ok) {
+		const error = await response.json().catch(() => null);
+		throw new Error(error?.detail || 'Unable to load indexed text');
+	}
+	return (await response.json()).content ?? '';
 };

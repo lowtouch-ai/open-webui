@@ -431,3 +431,34 @@ def delete_agent_connection_from_vault(
     except Exception as e:
         logger.error(f"Failed to delete agent connection from vault: {str(e)}")
         return False
+
+
+def sanitize_vault_keys_header(vault_keys_str: str, model: str) -> str:
+    """Normalize the x-ltai-vault-keys header value to 'sanitized_model/KEY_NAME'.
+
+    Accepts the raw '{model}_{KEY_NAME}' form (e.g. 'appz/tracker_API_KEY'), the
+    slash-separated but unsanitized form, and the already-correct form. Keys
+    starting with '^' are COMMON-scope and are left untouched.
+    """
+    if not vault_keys_str or not model:
+        return vault_keys_str
+
+    model_base = re.match(r'([^:]+)', model).group(1)  # strip :tag suffix
+    sanitized_model = re.sub(r'[^a-zA-Z0-9]', '_', model_base)
+
+    result = []
+    for vault_key in vault_keys_str.split(','):
+        vault_key = vault_key.strip()
+        if not vault_key:
+            continue
+        if vault_key.startswith('^'):
+            result.append(vault_key)
+        elif vault_key.startswith(model_base + '_'):
+            result.append(f"{sanitized_model}/{vault_key[len(model_base) + 1:]}")
+        elif '/' in vault_key:
+            agent_part, key_part = vault_key.rsplit('/', 1)
+            result.append(f"{re.sub(r'[^a-zA-Z0-9]', '_', agent_part)}/{key_part}")
+        else:
+            result.append(vault_key)
+
+    return ','.join(result)

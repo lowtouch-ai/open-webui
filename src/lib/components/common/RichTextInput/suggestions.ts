@@ -1,3 +1,6 @@
+import { mount, unmount } from 'svelte';
+import { createClassComponent } from 'svelte/legacy';
+
 import tippy from 'tippy.js';
 
 export function getSuggestionRenderer(Component: any, ComponentProps = {}) {
@@ -15,13 +18,14 @@ export function getSuggestionRenderer(Component: any, ComponentProps = {}) {
 				document.body.appendChild(container);
 
 				// mount Svelte component
-				component = new Component({
+				component = createClassComponent({
+					component: Component,
 					target: container,
 					props: {
-						char: props?.text,
+						char: props?.text?.charAt(0),
 						query: props?.query,
 						command: (item) => {
-							props.command({ id: item.id, label: item.label });
+							props.command(item);
 						},
 						...ComponentProps
 					},
@@ -84,7 +88,7 @@ export function getSuggestionRenderer(Component: any, ComponentProps = {}) {
 				component.$set({
 					query: props.query,
 					command: (item) => {
-						props.command({ id: item.id, label: item.label });
+						props.command(item);
 					}
 				});
 
@@ -104,7 +108,12 @@ export function getSuggestionRenderer(Component: any, ComponentProps = {}) {
 				popup?.destroy();
 				popup = null;
 
-				component?.$destroy();
+				try {
+					component?.$destroy();
+				} catch (e) {
+					console.error('Error unmounting component:', e);
+				}
+
 				component = null;
 
 				if (container?.parentNode) container.parentNode.removeChild(container);

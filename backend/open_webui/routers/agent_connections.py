@@ -13,7 +13,7 @@ from open_webui.utils.vault import (
     sanitize_agent_name,
     sanitize_key_field,
 )
-from open_webui.config import ENABLE_VAULT_INTEGRATION as VAULT_CONFIG
+from open_webui.utils import vault as vault_utils
 from open_webui.models.users import Users
 from loguru import logger
 
@@ -102,7 +102,7 @@ async def create_agent_connection(
         
         # Store in vault if enabled
         vault_user_id = request.headers.get('x-ltai-vault-user') or user.id
-        if VAULT_CONFIG.value:
+        if vault_utils.ENABLE_VAULT_INTEGRATION:
             success = store_agent_connection_in_vault(vault_connection, vault_user_id)
             if not success:
                 raise HTTPException(status_code=500, detail="Failed to store key in Vault")
@@ -140,7 +140,7 @@ async def list_agent_connections(request: Request, user=Depends(get_verified_use
     try:
         connections = []
         
-        if VAULT_CONFIG.value:
+        if vault_utils.ENABLE_VAULT_INTEGRATION:
             # Get Vault client
             vault_client = get_vault_client()
             if vault_client and vault_client.connect():
@@ -204,14 +204,14 @@ async def list_all_agent_connections(user=Depends(get_admin_user)):
     try:
         connections = []
 
-        if VAULT_CONFIG.value:
+        if vault_utils.ENABLE_VAULT_INTEGRATION:
             # Get Vault client
             vault_client = get_vault_client()
             if vault_client and vault_client.connect():
                 try:
                     # Get all user information once from the database.
                     # Users.get_users() returns a dict {"users": [...], "total": N}
-                    users_result = Users.get_users()
+                    users_result = await Users.get_users()
                     user_list = users_result.get("users", []) if isinstance(users_result, dict) else []
                     
                     # Debug: Log the type and content of user_list
@@ -324,7 +324,7 @@ async def get_agent_connection(
         agent_id = None if is_common or agent_scope_decoded == "default" else agent_scope_decoded
         
         # Get from vault
-        if VAULT_CONFIG.value:
+        if vault_utils.ENABLE_VAULT_INTEGRATION:
             value = get_agent_connection_from_vault(
                 name=key_name,
                 user_id=request.headers.get('x-ltai-vault-user') or user_id_from_key,
@@ -383,7 +383,7 @@ async def update_agent_connection(
         
         # Get current value if not updating it
         current_value = None
-        if not connection.key_value and VAULT_CONFIG.value:
+        if not connection.key_value and vault_utils.ENABLE_VAULT_INTEGRATION:
             current_value = get_agent_connection_from_vault(
                 name=current_key_name,
                 user_id=request.headers.get('x-ltai-vault-user') or user_id_from_key,
@@ -406,7 +406,7 @@ async def update_agent_connection(
             new_agent_id != agent_id or 
             new_is_common != is_common):
             
-            if VAULT_CONFIG.value:
+            if vault_utils.ENABLE_VAULT_INTEGRATION:
                 delete_agent_connection_from_vault(
                     name=current_key_name,
                     user_id=request.headers.get('x-ltai-vault-user') or user_id_from_key,
@@ -422,7 +422,7 @@ async def update_agent_connection(
             "is_common": new_is_common
         }
         
-        if VAULT_CONFIG.value:
+        if vault_utils.ENABLE_VAULT_INTEGRATION:
             vault_user_id = request.headers.get('x-ltai-vault-user') or user_id_from_key
             success = store_agent_connection_in_vault(vault_connection, vault_user_id)
             if not success:
@@ -482,7 +482,7 @@ async def delete_agent_connection(
         agent_id = None if is_common or agent_scope_decoded == "default" else agent_scope_decoded
         
         # Delete from vault
-        if VAULT_CONFIG.value:
+        if vault_utils.ENABLE_VAULT_INTEGRATION:
             success = delete_agent_connection_from_vault(
                 name=key_name,
                 user_id=request.headers.get('x-ltai-vault-user') or user_id_from_key,

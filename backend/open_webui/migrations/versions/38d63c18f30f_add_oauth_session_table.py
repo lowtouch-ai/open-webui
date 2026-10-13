@@ -8,45 +8,57 @@ Create Date: 2025-09-08 14:19:59.583921
 
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "38d63c18f30f"
-down_revision: Union[str, None] = "3af16a1c9fb6"
+revision: str = '38d63c18f30f'
+down_revision: Union[str, None] = '3af16a1c9fb6'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Create oauth_session table
-    op.create_table(
-        "oauth_session",
-        sa.Column("id", sa.Text(), nullable=False),
-        sa.Column("user_id", sa.Text(), nullable=False),
-        sa.Column("provider", sa.Text(), nullable=False),
-        sa.Column("token", sa.Text(), nullable=False),
-        sa.Column("expires_at", sa.BigInteger(), nullable=False),
-        sa.Column("created_at", sa.BigInteger(), nullable=False),
-        sa.Column("updated_at", sa.BigInteger(), nullable=False),
-        sa.PrimaryKeyConstraint("id"),
-        sa.ForeignKeyConstraint(["user_id"], ["user.id"], ondelete="CASCADE"),
+    inspector = sa.inspect(op.get_bind())
+    existing_tables = set(inspector.get_table_names())
+
+    # ── Create oauth_session table (idempotent) ───────────────────────
+    if 'oauth_session' not in existing_tables:
+        op.create_table(
+            'oauth_session',
+            sa.Column('id', sa.Text(), primary_key=True, nullable=False, unique=True),
+            sa.Column(
+                'user_id',
+                sa.Text(),
+                sa.ForeignKey('user.id', ondelete='CASCADE'),
+                nullable=False,
+            ),
+            sa.Column('provider', sa.Text(), nullable=False),
+            sa.Column('token', sa.Text(), nullable=False),
+            sa.Column('expires_at', sa.BigInteger(), nullable=False),
+            sa.Column('created_at', sa.BigInteger(), nullable=False),
+            sa.Column('updated_at', sa.BigInteger(), nullable=False),
+        )
+
+    # Create indexes (idempotent — no-ops when table was just created
+    # with the columns above, and safe to call if indexes already exist).
+    existing_indexes = (
+        {idx['name'] for idx in inspector.get_indexes('oauth_session')} if 'oauth_session' in existing_tables else set()
     )
 
-    # Create indexes for better performance
-    op.create_index("idx_oauth_session_user_id", "oauth_session", ["user_id"])
-    op.create_index("idx_oauth_session_expires_at", "oauth_session", ["expires_at"])
-    op.create_index(
-        "idx_oauth_session_user_provider", "oauth_session", ["user_id", "provider"]
-    )
+    if 'idx_oauth_session_user_id' not in existing_indexes:
+        op.create_index('idx_oauth_session_user_id', 'oauth_session', ['user_id'])
+    if 'idx_oauth_session_expires_at' not in existing_indexes:
+        op.create_index('idx_oauth_session_expires_at', 'oauth_session', ['expires_at'])
+    if 'idx_oauth_session_user_provider' not in existing_indexes:
+        op.create_index('idx_oauth_session_user_provider', 'oauth_session', ['user_id', 'provider'])
 
 
 def downgrade() -> None:
     # Drop indexes first
-    op.drop_index("idx_oauth_session_user_provider", table_name="oauth_session")
-    op.drop_index("idx_oauth_session_expires_at", table_name="oauth_session")
-    op.drop_index("idx_oauth_session_user_id", table_name="oauth_session")
+    op.drop_index('idx_oauth_session_user_provider', table_name='oauth_session')
+    op.drop_index('idx_oauth_session_expires_at', table_name='oauth_session')
+    op.drop_index('idx_oauth_session_user_id', table_name='oauth_session')
 
     # Drop the table
-    op.drop_table("oauth_session")
+    op.drop_table('oauth_session')

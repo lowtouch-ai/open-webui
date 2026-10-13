@@ -11,15 +11,41 @@ const packages = [
 	'regex',
 	'sympy',
 	'tiktoken',
-	'seaborn',
 	'pytz',
 	'black',
-	'openai'
+	'openai',
+	'lxml'
 ];
+
+// Pure-Python packages whose wheels must be downloaded from PyPI and saved into
+// static/pyodide/ so that the browser can install them offline via micropip.
+// Packages already provided by the Pyodide distribution (click, platformdirs,
+// typing_extensions, etc.) do NOT need to be listed here.
+// Spell them canonically (dashed): that is the only form pyodide resolves lock entries by.
+const pypiPackages = [
+	'black',
+	'pathspec',
+	'mypy-extensions',
+	'pytokens',
+	'openpyxl',
+	'et-xmlfile',
+	'seaborn',
+	'python-pptx',
+	'python-docx',
+	'xlsxwriter'
+];
+
+const pypiDepends = {
+	black: ['click', 'mypy-extensions', 'packaging', 'pathspec', 'platformdirs', 'pytokens'],
+	openpyxl: ['et-xmlfile'],
+	seaborn: ['matplotlib', 'numpy', 'pandas'],
+	'python-pptx': ['lxml', 'pillow', 'xlsxwriter', 'typing-extensions'],
+	'python-docx': ['lxml', 'typing-extensions']
+};
 
 import { loadPyodide } from 'pyodide';
 import { setGlobalDispatcher, ProxyAgent } from 'undici';
-import { writeFile, readFile, copyFile, readdir, rmdir } from 'fs/promises';
+import { writeFile, readFile, copyFile, readdir, rmdir, access, mkdir, rm } from 'fs/promises';
 
 /**
  * Loading network proxy configurations from the environment variables.
@@ -117,6 +143,121 @@ async function copyPyodide() {
 	}
 }
 
+/**
+ * Download pure-Python wheels from PyPI and save them into static/pyodide/.
+ * Also injects entries into pyodide-lock.json so that micropip resolves these
+ * packages from the local server instead of fetching them from the internet.
+ */
+async function downloadPyPIWheels() {
+	const lockPath = 'static/pyodide/pyodide-lock.json';
+	let lockData;
+	try {
+		lockData = JSON.parse(await readFile(lockPath, 'utf-8'));
+	} catch {
+		console.warn('Could not read pyodide-lock.json, skipping PyPI wheel download');
+		return;
+	}
+
+	for (const pkg of pypiPackages) {
+		console.log(`Fetching PyPI metadata for: ${pkg}`);
+		const res = await fetch(`https://pypi.org/pypi/${pkg}/json`);
+		if (!res.ok) {
+			console.error(`Failed to fetch PyPI metadata for ${pkg}: ${res.status}`);
+			continue;
+		}
+		const meta = await res.json();
+		const version = meta.info.version;
+		const files = meta.urls || [];
+		// Find the pure-Python wheel (py3-none-any)
+		const wheel = files.find(
+			(f) => f.filename.endsWith('.whl') && f.filename.includes('py3-none-any')
+		);
+		if (!wheel) {
+			console.warn(`No pure-Python wheel found for ${pkg}==${version}, skipping`);
+			continue;
+		}
+		const dest = `static/pyodide/${wheel.filename}`;
+		// Download wheel if not already present
+		try {
+			await access(dest);
+			console.log(`  Already exists: ${wheel.filename}`);
+		} catch {
+			console.log(`  Downloading: ${wheel.filename}`);
+			const wheelRes = await fetch(wheel.url);
+			if (!wheelRes.ok) {
+				console.error(`  Failed to download ${wheel.filename}: ${wheelRes.status}`);
+				continue;
+			}
+			const buffer = Buffer.from(await wheelRes.arrayBuffer());
+			await writeFile(dest, buffer);
+			console.log(`  Saved: ${dest} (${buffer.length} bytes)`);
+		}
+
+		// Inject into pyodide-lock.json so micropip resolves locally
+		if (!lockData.packages[pkg]) {
+			lockData.packages[pkg] = {
+				name: pkg,
+				version: version,
+				file_name: wheel.filename,
+				install_dir: 'site',
+				sha256: wheel.digests?.sha256 || '',
+				package_type: 'package',
+				imports: [pkg.replace(/-/g, '_')],
+				depends: pypiDepends[pkg] || []
+			};
+			console.log(`  Added ${pkg}==${version} to pyodide-lock.json`);
+		}
+	}
+
+	await writeFile(lockPath, JSON.stringify(lockData, null, 2));
+	console.log('Updated pyodide-lock.json with PyPI packages');
+}
+
+// A package with no bundled wheel is installed from PyPI in the user's browser instead.
+async function verifyBundledWheels() {
+	const lockPath = 'static/pyodide/pyodide-lock.json';
+	const lockData = JSON.parse(await readFile(lockPath, 'utf-8'));
+	const missing = [];
+
+	for (const pkg of new Set([...packages, ...pypiPackages, ...Object.values(pypiDepends).flat()])) {
+		const entry = lockData.packages[pkg.toLowerCase().replace(/[-_.]+/g, '-')];
+		if (!entry) {
+			missing.push(pkg);
+			continue;
+		}
+		try {
+			await access(`static/pyodide/${entry.file_name}`);
+		} catch {
+			missing.push(pkg);
+		}
+	}
+
+	if (missing.length) {
+		throw new Error(`No wheel bundled for: ${missing.join(', ')}`);
+	}
+	console.log('All listed packages are bundled');
+}
+
 initNetworkProxyFromEnv();
-await downloadPackages();
-await copyPyodide();
+if (process.env.USE_SLIM === 'true') {
+	// Rebuild generated assets so a previous full build cannot leave bundled wheels behind.
+	await rm('static/pyodide', { recursive: true, force: true });
+	await mkdir('static/pyodide', { recursive: true });
+	await copyPyodide();
+
+	const { version } = JSON.parse(await readFile('node_modules/pyodide/package.json', 'utf-8'));
+	const lockPath = 'static/pyodide/pyodide-lock.json';
+	const lockData = JSON.parse(await readFile(lockPath, 'utf-8'));
+	for (const pkg of Object.values(lockData.packages)) {
+		pkg.file_name = new URL(
+			pkg.file_name,
+			`https://cdn.jsdelivr.net/pyodide/v${version}/full/`
+		).href;
+	}
+	await writeFile(lockPath, JSON.stringify(lockData, null, 2));
+} else {
+	await downloadPackages();
+	await copyPyodide();
+	await downloadPyPIWheels();
+	await verifyBundledWheels();
+}
